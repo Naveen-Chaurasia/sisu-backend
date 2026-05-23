@@ -15,4 +15,4 @@ COPY policies/ ./policies/
 
 EXPOSE $PORT
 
-CMD uvicorn api:app --host 0.0.0.0 --port $PORT
+CMD ["sh", "-c", "uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}"]
