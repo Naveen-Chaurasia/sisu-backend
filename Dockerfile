@@ -2,24 +2,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy and install SISEPUEDE from local source first (heavy dependency)
-COPY sisepuede/ ./sisepuede/
-RUN pip install --no-cache-dir ./sisepuede/
-
-# Install backend dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend files
-COPY api.py config.py mexico_full_input.csv ./
+COPY api.py apiv2.py config.py mexico_full_input.csv ./
+COPY policies/ ./policies/
 
-# HF Spaces requires port 7860
-EXPOSE 7860
+EXPOSE $PORT
 
-# Start server
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD uvicorn api:app --host 0.0.0.0 --port $PORT

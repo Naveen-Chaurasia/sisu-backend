@@ -22,7 +22,6 @@ env/
 .env.production
 
 # Data files
-*.csv
 *.xlsx
 *.parquet
 *.h5
