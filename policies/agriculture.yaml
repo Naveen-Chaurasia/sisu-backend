@@ -1,0 +1,118 @@
+sector: agriculture
+sector_label: "Agriculture & Land Use"
+sector_description: "Croplands, livestock, forestry, land use change, and soil management"
+policies:
+  - id: rice_management
+    name: "Improved Rice Management"
+    category: "CH4 Reduction"
+    description: "Reduce CH4 from rice paddies via water management by 50%"
+    capex_per_tco2: 20
+    opex_per_tco2: 4
+    transformer: "TFR:AGRC:DEC_CH4_RICE"
+    parameters:
+      magnitude: 0.5
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: conservation_agriculture
+    name: "Conservation Agriculture"
+    category: "Soil Carbon"
+    description: "Expand conservation tillage practices to 70% of croplands"
+    capex_per_tco2: 18
+    opex_per_tco2: 3
+    transformer: "TFR:AGRC:INC_CONSERVATION_AGRICULTURE"
+    parameters:
+      magnitude: 0.7
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: enteric_fermentation
+    name: "Reduce Enteric Fermentation"
+    category: "Livestock CH4"
+    description: "Reduce livestock CH4 from enteric fermentation by 50% via feed additives"
+    capex_per_tco2: 30
+    opex_per_tco2: 8
+    transformer: "TFR:LVST:DEC_ENTERIC_FERMENTATION"
+    parameters:
+      magnitude: 0.5
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: stop_deforestation
+    name: "Stop Deforestation"
+    category: "Land Use"
+    description: "Eliminate deforestation rates by 2030"
+    capex_per_tco2: 15
+    opex_per_tco2: 5
+    transformer: "TFR:LNDU:DEC_DEFORESTATION"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: reforestation
+    name: "Expand Reforestation"
+    category: "Carbon Sequestration"
+    description: "Increase reforestation and afforestation to capture additional CO2"
+    capex_per_tco2: 12
+    opex_per_tco2: 3
+    transformer: "TFR:LNDU:INC_REFORESTATION"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: manure_biogas
+    name: "Manure Biogas Capture"
+    category: "CH4 Capture"
+    description: "Capture and utilize biogas from livestock manure management"
+    capex_per_tco2: 22
+    opex_per_tco2: 5
+    transformer: "TFR:LSMM:INC_CAPTURE_BIOGAS"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: reduce_fertilizer
+    name: "Reduce Excess Fertilizer"
+    category: "N2O Reduction"
+    description: "Reduce nitrogen fertilizer over-application to cut N2O emissions"
+    capex_per_tco2: 10
+    opex_per_tco2: 2
+    transformer: "TFR:SOIL:DEC_N_APPLIED"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: silvopasture
+    name: "Silvopasture Expansion"
+    category: "Carbon Sequestration"
+    description: "Integrate trees into pasture lands to sequester carbon and reduce emissions"
+    capex_per_tco2: 14
+    opex_per_tco2: 3
+    transformer: "TFR:LNDU:INC_SILVOPASTURE"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]

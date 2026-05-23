@@ -1,0 +1,117 @@
+sector: waste
+sector_label: "Waste & Circular Economy"
+sector_description: "Solid waste, organic waste, wastewater treatment, and biogas recovery"
+policies:
+  - id: increase_recycling
+    name: "Increase Recycling"
+    category: "Waste Diversion"
+    description: "Increase municipal solid waste recycling rate to 60%"
+    capex_per_tco2: 25
+    opex_per_tco2: 6
+    transformer: "TFR:WASO:INC_RECYCLING"
+    parameters:
+      magnitude: 0.6
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: anaerobic_composting
+    name: "Anaerobic Treatment & Composting"
+    category: "Organic Waste"
+    description: "Divert organic waste to anaerobic digestion and composting"
+    capex_per_tco2: 35
+    opex_per_tco2: 8
+    transformer: "TFR:WASO:INC_ANAEROBIC_AND_COMPOST"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: waste_biogas_capture
+    name: "Landfill Biogas Capture"
+    category: "CH4 Capture"
+    description: "Capture biogas from existing landfills for energy recovery"
+    capex_per_tco2: 20
+    opex_per_tco2: 5
+    transformer: "TFR:WASO:INC_CAPTURE_BIOGAS"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: reduce_food_waste
+    name: "Reduce Consumer Food Waste"
+    category: "Demand Reduction"
+    description: "Reduce household food waste by 40% through education and infrastructure"
+    capex_per_tco2: 15
+    opex_per_tco2: 3
+    transformer: "TFR:WASO:DEC_CONSUMER_FOOD_WASTE"
+    parameters:
+      magnitude: 0.4
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: urban_wastewater
+    name: "Improve Urban Wastewater Treatment"
+    category: "Wastewater"
+    description: "Upgrade urban wastewater treatment to reduce N2O and CH4 emissions"
+    capex_per_tco2: 40
+    opex_per_tco2: 10
+    transformer: "TFR:WALI:INC_TREATMENT_URBAN"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: wastewater_biogas
+    name: "Wastewater Biogas Recovery"
+    category: "Biogas Capture"
+    description: "Capture and utilize biogas from wastewater treatment plants"
+    capex_per_tco2: 30
+    opex_per_tco2: 7
+    transformer: "TFR:TRWW:INC_CAPTURE_BIOGAS"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: energy_from_incineration
+    name: "Waste-to-Energy Incineration"
+    category: "Energy Recovery"
+    description: "Convert non-recyclable waste to energy via modern incineration"
+    capex_per_tco2: 55
+    opex_per_tco2: 12
+    transformer: "TFR:WASO:INC_ENERGY_FROM_INCINERATION"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: rural_sanitation
+    name: "Rural Sanitation Improvement"
+    category: "Wastewater"
+    description: "Improve rural wastewater collection and treatment infrastructure"
+    capex_per_tco2: 35
+    opex_per_tco2: 8
+    transformer: "TFR:WALI:INC_TREATMENT_RURAL"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]

@@ -1,0 +1,117 @@
+sector: industrial
+sector_label: "Industrial Processes"
+sector_description: "IPPU: cement, chemicals, metals, and fluorinated gas reduction"
+policies:
+  - id: cement_clinker_reduction
+    name: "Reduce Cement Clinker Ratio"
+    category: "Industrial Process"
+    description: "Lower clinker-to-cement ratio to 50% via supplementary cementitious materials"
+    capex_per_tco2: 35
+    opex_per_tco2: 6
+    transformer: "TFR:IPPU:DEC_CLINKER"
+    parameters:
+      magnitude: 0.5
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: hfc_phaseout
+    name: "HFC Phase-out"
+    category: "Fluorinated Gases"
+    description: "Phase out HFCs from refrigeration and HVAC systems (Kigali alignment)"
+    capex_per_tco2: 45
+    opex_per_tco2: 8
+    transformer: "TFR:IPPU:DEC_HFCS"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: pfc_reduction
+    name: "PFC Reduction"
+    category: "Fluorinated Gases"
+    description: "Reduce perfluorocarbons from aluminum smelting and semiconductor manufacturing"
+    capex_per_tco2: 50
+    opex_per_tco2: 9
+    transformer: "TFR:IPPU:DEC_PFCS"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: ippu_demand_reduction
+    name: "Industrial Demand Management"
+    category: "Demand Reduction"
+    description: "30% reduction in industrial product demand via circular economy"
+    capex_per_tco2: 20
+    opex_per_tco2: 5
+    transformer: "TFR:IPPU:DEC_DEMAND"
+    parameters:
+      magnitude: 0.3
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: n2o_reduction
+    name: "Industrial N2O Reduction"
+    category: "N2O Reduction"
+    description: "Reduce N2O emissions from nitric acid and chemical production processes"
+    capex_per_tco2: 40
+    opex_per_tco2: 7
+    transformer: "TFR:IPPU:DEC_N2O"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: other_fcs_reduction
+    name: "Reduce SF6 & Other F-Gases"
+    category: "Fluorinated Gases"
+    description: "Reduce SF6 and other fluorinated compounds in switchgear and manufacturing"
+    capex_per_tco2: 55
+    opex_per_tco2: 10
+    transformer: "TFR:IPPU:DEC_OTHER_FCS"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: industrial_ccs
+    name: "Industrial Carbon Capture & Storage"
+    category: "Carbon Removal"
+    description: "Deploy CCS at industrial point sources — cement, steel, and chemicals"
+    capex_per_tco2: 180
+    opex_per_tco2: 30
+    transformer: "TFR:PFLO:INC_IND_CCS"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 10
+        window_logistic: [-8, 8]
+
+  - id: production_efficiency
+    name: "Industrial Production Efficiency"
+    category: "Efficiency"
+    description: "Improve industrial production process efficiency by 25%"
+    capex_per_tco2: 30
+    opex_per_tco2: 5
+    transformer: "TFR:INEN:INC_EFFICIENCY_PRODUCTION"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]

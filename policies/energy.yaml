@@ -1,0 +1,119 @@
+sector: energy
+sector_label: "Energy & Buildings"
+sector_description: "Industrial energy, electricity generation, buildings, and fugitive emissions"
+policies:
+  - id: inen_energy_efficiency
+    name: "Industrial Energy Efficiency"
+    category: "Efficiency"
+    description: "30% improvement in industrial energy efficiency by 2035"
+    capex_per_tco2: 45
+    opex_per_tco2: 8
+    transformer: "TFR:INEN:INC_EFFICIENCY_ENERGY"
+    parameters:
+      magnitude: 0.3
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: renewable_electricity
+    name: "Renewable Electricity Target"
+    category: "Clean Energy"
+    description: "90% renewable electricity target by 2040"
+    capex_per_tco2: 80
+    opex_per_tco2: 12
+    transformer: "TFR:ENTC:TARGET_RENEWABLE_ELEC"
+    parameters:
+      magnitude: 0.9
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: inen_fuel_switch_heat
+    name: "Industrial Clean Heat Switch"
+    category: "Fuel Switch"
+    description: "Switch 90% of industrial thermal processes to electricity/hydrogen by 2040"
+    capex_per_tco2: 95
+    opex_per_tco2: 15
+    transformer: "TFR:INEN:SHIFT_FUEL_HEAT"
+    parameters:
+      frac_switchable: 0.9
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 10
+        window_logistic: [-8, 8]
+
+  - id: scoe_building_efficiency
+    name: "Building Appliance Efficiency"
+    category: "Efficiency"
+    description: "25% improvement in building appliance efficiency by 2035"
+    capex_per_tco2: 30
+    opex_per_tco2: 5
+    transformer: "TFR:SCOE:INC_EFFICIENCY_APPLIANCE"
+    parameters:
+      magnitude: 0.25
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: fgtv_minimize_leaks
+    name: "Minimize Fugitive Gas Leaks"
+    category: "Leak Reduction"
+    description: "Maximize reduction of fugitive gas leaks from fossil fuel infrastructure"
+    capex_per_tco2: 25
+    opex_per_tco2: 4
+    transformer: "TFR:FGTV:DEC_LEAKS"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: entc_reduce_losses
+    name: "Reduce Grid Transmission Losses"
+    category: "Efficiency"
+    description: "Reduce electricity transmission and distribution losses by 50%"
+    capex_per_tco2: 35
+    opex_per_tco2: 6
+    transformer: "TFR:ENTC:DEC_LOSSES"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: scoe_fuel_switch_heat
+    name: "Buildings Switch to Heat Pumps"
+    category: "Fuel Switch"
+    description: "Switch building heating to electric heat pumps by 2040"
+    capex_per_tco2: 65
+    opex_per_tco2: 10
+    transformer: "TFR:SCOE:SHIFT_FUEL_HEAT"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 10
+        window_logistic: [-8, 8]
+
+  - id: ccsq_air_capture
+    name: "Direct Air Carbon Capture"
+    category: "Carbon Removal"
+    description: "Deploy direct air capture (DAC) technology for carbon removal"
+    capex_per_tco2: 250
+    opex_per_tco2: 45
+    transformer: "TFR:CCSQ:INC_CAPTURE"
+    parameters:
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 15
+        window_logistic: [-8, 8]

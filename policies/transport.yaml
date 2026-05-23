@@ -1,0 +1,135 @@
+sector: transport
+sector_label: "Transport"
+sector_description: "Road, rail, aviation, and maritime decarbonization policies"
+policies:
+  - id: heavy_freight_elec
+    name: "Electrify Heavy Freight"
+    category: "Fuel Switch"
+    description: "70% of heavy-duty trucks switch diesel→electric by 2040"
+    capex_per_tco2: 120
+    opex_per_tco2: 18
+    transformer: "TFR:TRNS:SHIFT_FUEL_MEDIUM_DUTY"
+    parameters:
+      categories: ["road_heavy_freight", "road_heavy_regional"]
+      fuels_source: ["fuel_diesel"]
+      dict_allocation_fuels_target:
+        fuel_electricity: 1.0
+      magnitude: 0.7
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 10
+        window_logistic: [-8, 8]
+
+  - id: light_vehicles_elec
+    name: "Electrify Light Vehicles"
+    category: "Fuel Switch"
+    description: "70% of private cars switch gasoline→electric by 2040"
+    capex_per_tco2: 95
+    opex_per_tco2: 10
+    transformer: "TFR:TRNS:SHIFT_FUEL_LIGHT_DUTY"
+    parameters:
+      dict_allocation_fuels_target:
+        fuel_electricity: 1.0
+      magnitude: 0.7
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 10
+        window_logistic: [-8, 8]
+
+  - id: rail_electrification
+    name: "Electrify Rail"
+    category: "Fuel Switch"
+    description: "80% of rail operations switch to electricity by 2035"
+    capex_per_tco2: 60
+    opex_per_tco2: 8
+    transformer: "TFR:TRNS:SHIFT_FUEL_RAIL"
+    parameters:
+      dict_allocation_fuels_target:
+        fuel_electricity: 1.0
+      magnitude: 0.8
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: maritime_hydrogen
+    name: "Maritime to Hydrogen"
+    category: "Fuel Switch"
+    description: "60% of maritime shipping switches diesel→hydrogen by 2045"
+    capex_per_tco2: 180
+    opex_per_tco2: 35
+    transformer: "TFR:TRNS:SHIFT_FUEL_MARITIME"
+    parameters:
+      dict_allocation_fuels_target:
+        fuel_hydrogen: 1.0
+      magnitude: 0.6
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 15
+        window_logistic: [-8, 8]
+
+  - id: efficiency_improvement
+    name: "Improve Fuel Efficiency"
+    category: "Efficiency"
+    description: "25% efficiency improvement across all non-electric modes by 2035"
+    capex_per_tco2: 40
+    opex_per_tco2: 5
+    transformer: "TFR:TRNS:INC_EFFICIENCY_NON_ELECTRIC"
+    parameters:
+      categories: ["road_heavy_freight", "road_heavy_regional", "road_light", "public"]
+      fuels: ["fuel_diesel", "fuel_gasoline"]
+      magnitude: 0.25
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: freight_mode_shift
+    name: "Freight Modal Shift to Rail"
+    category: "Mode Shift"
+    description: "50% of road freight shifts to rail by 2035"
+    capex_per_tco2: 55
+    opex_per_tco2: 12
+    transformer: "TFR:TRNS:SHIFT_MODE_FREIGHT"
+    parameters:
+      magnitude: 0.5
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: passenger_mode_shift
+    name: "Passenger Modal Shift"
+    category: "Mode Shift"
+    description: "40% of private car trips shift to transit/cycling by 2035"
+    capex_per_tco2: 35
+    opex_per_tco2: 8
+    transformer: "TFR:TRNS:SHIFT_MODE_PASSENGER"
+    parameters:
+      magnitude: 0.4
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
+
+  - id: demand_reduction
+    name: "Demand Reduction"
+    category: "Demand"
+    description: "20% total demand reduction via remote work & trip consolidation by 2030"
+    capex_per_tco2: 15
+    opex_per_tco2: 3
+    transformer: "TFR:TRDE:DEC_DEMAND"
+    parameters:
+      magnitude: 0.2
+      vec_implementation_ramp:
+        alpha_logistic: 0.0
+        n_tp_ramp: null
+        tp_0_ramp: 5
+        window_logistic: [-8, 8]
