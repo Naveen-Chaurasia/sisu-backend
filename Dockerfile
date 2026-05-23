@@ -10,9 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY api.py apiv2.py config.py mexico_full_input.csv ./
+COPY api.py apiv2.py config.py mexico_full_input.csv start.py ./
 COPY policies/ ./policies/
 
-EXPOSE $PORT
-
-CMD ["sh", "-c", "uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["python", "start.py"]
