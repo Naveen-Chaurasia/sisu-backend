@@ -5,6 +5,9 @@ import json
 import os
 import sys
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware

@@ -3,4 +3,5 @@ uvicorn[standard]
 anthropic
 pandas
 numpy
+python-dotenv
 git+https://github.com/jcsyme/sisepuede.git
