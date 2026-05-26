@@ -87,6 +87,95 @@ SUBSECTOR_COLORS = {
     "fgtv": "#78716c", "ippu": "#ef4444",
 }
 
+# ── Fine-grained category labels & colours (one level below subsector) ─────────
+DETAIL_LABELS: Dict[str, str] = {
+    # agrc – crop types
+    "rice": "Rice", "cereals": "Cereals", "fruits": "Fruits",
+    "vegetables_and_vines": "Vegetables & Vines", "sugar_cane": "Sugar Cane",
+    "nuts": "Nuts", "pulses": "Pulses", "fibers": "Fibers",
+    "tubers": "Tubers", "other_annual": "Other Annual",
+    "other_woody_perennial": "Other Woody Perennial",
+    "herbs_and_other_perennial_crops": "Herbs & Perennials",
+    "bevs_and_spices": "Beverages & Spices",
+    # lvst – livestock
+    "buffalo": "Buffalo", "cattle_dairy": "Dairy Cattle",
+    "cattle_nondairy": "Beef Cattle", "chickens": "Chickens",
+    "goats": "Goats", "horses": "Horses", "mules": "Mules",
+    "pigs": "Pigs", "sheep": "Sheep",
+    # lsmm – manure management systems
+    "anaerobic_digester": "Anaerobic Digester", "lagoon": "Lagoon",
+    "composting": "Composting", "dry_lot": "Dry Lot",
+    "deep_bedding": "Deep Bedding", "biodigester": "Biodigester",
+    "solid_storage": "Solid Storage", "pasture": "Pasture Range",
+    "daily_spread": "Daily Spread",
+    # soil
+    "synthetic_fertilizer": "Synthetic Fertilizer",
+    "organic_amendments": "Organic Amendments",
+    "rice_fields": "Rice Fields", "liming": "Liming", "urea": "Urea",
+    # waso – solid waste streams
+    "food": "Food Waste", "paper": "Paper", "plastic": "Plastics",
+    "glass": "Glass", "metal": "Metal", "nappies": "Nappies",
+    "textiles": "Textiles", "wood": "Wood",
+    "rubber_leather": "Rubber & Leather",
+    "chemical_industrial": "Chemical/Industrial",
+    "sludge": "Sludge", "yard": "Yard Waste",
+    # wali / trww – wastewater
+    "domestic_rural": "Rural Domestic", "domestic_urban": "Urban Domestic",
+    "industrial": "Industrial Effluent",
+    # lndu – land use categories
+    "croplands": "Croplands", "forests": "Forests",
+    "grasslands": "Grasslands", "wetlands": "Wetlands",
+    "settlements": "Settlements",
+    # ippu – industrial process sub-categories
+    "cement": "Cement & Lime", "chemicals": "Chemical Industry",
+    "metals": "Metal Production", "electronics": "Electronics",
+    "hfcs": "HFC Refrigerants", "pfcs": "PFC Gases",
+    "n2o": "N₂O Processes", "sf6": "SF₆ Equipment",
+}
+
+DETAIL_COLORS: Dict[str, str] = {
+    # agrc crops – greens/yellows
+    "rice": "#84cc16", "cereals": "#a3e635", "fruits": "#f97316",
+    "vegetables_and_vines": "#22c55e", "sugar_cane": "#fbbf24",
+    "nuts": "#d97706", "pulses": "#65a30d", "fibers": "#15803d",
+    "tubers": "#ca8a04", "other_annual": "#4ade80",
+    "other_woody_perennial": "#166534",
+    "herbs_and_other_perennial_crops": "#86efac",
+    "bevs_and_spices": "#fde68a",
+    # lvst – earthy tones
+    "buffalo": "#78350f", "cattle_dairy": "#f59e0b",
+    "cattle_nondairy": "#b45309", "chickens": "#fcd34d",
+    "goats": "#d97706", "horses": "#92400e", "mules": "#a16207",
+    "pigs": "#fb923c", "sheep": "#fef08a",
+    # lsmm
+    "anaerobic_digester": "#06b6d4", "lagoon": "#0891b2",
+    "composting": "#65a30d", "dry_lot": "#a3a3a3",
+    "deep_bedding": "#78716c", "biodigester": "#22d3ee",
+    "solid_storage": "#94a3b8", "pasture": "#4ade80",
+    "daily_spread": "#86efac",
+    # soil
+    "synthetic_fertilizer": "#f43f5e", "organic_amendments": "#fb923c",
+    "rice_fields": "#84cc16", "liming": "#cbd5e1", "urea": "#fca5a5",
+    # waso
+    "food": "#8b5cf6", "paper": "#a78bfa", "plastic": "#6d28d9",
+    "glass": "#c4b5fd", "metal": "#94a3b8", "nappies": "#f9a8d4",
+    "textiles": "#ec4899", "wood": "#92400e",
+    "rubber_leather": "#78350f", "chemical_industrial": "#ef4444",
+    "sludge": "#64748b", "yard": "#22c55e",
+    # wali / trww
+    "domestic_rural": "#818cf8", "domestic_urban": "#6366f1",
+    "industrial": "#4338ca",
+    # lndu
+    "croplands": "#fbbf24", "forests": "#16a34a",
+    "grasslands": "#84cc16", "wetlands": "#0ea5e9",
+    "settlements": "#94a3b8",
+    # ippu
+    "cement": "#f97316", "chemicals": "#3b82f6",
+    "metals": "#94a3b8", "electronics": "#8b5cf6",
+    "hfcs": "#ec4899", "pfcs": "#06b6d4",
+    "sf6": "#fbbf24",
+}
+
 # GHG Protocol scope classification per non-transport sector.
 # Keys must match SECTOR_EMISSION_PREFIXES entries.
 # scope1 = direct combustion/process; scope2 = electricity/grid; scope3 = upstream/fugitive
@@ -100,6 +189,16 @@ SECTOR_SCOPE_MAP: Dict[str, Dict[str, List[str]]] = {
         "scope1": ["ippu"],  # direct industrial process emissions
         "scope2": [],        # electricity for processes captured in inen (energy sector)
         "scope3": [],        # upstream raw materials not modelled in SISEPUEDE
+    },
+    "agriculture": {
+        "scope1": ["agrc", "lvst", "lsmm", "soil"],  # direct field/livestock/manure/soil
+        "scope2": [],                                  # no grid electricity in AFOLU model
+        "scope3": ["lndu", "pflo"],                   # land-use change & forestry
+    },
+    "waste": {
+        "scope1": ["waso", "wali"],  # solid waste disposal & liquid wastewater direct
+        "scope2": [],
+        "scope3": ["trww"],          # industrial wastewater (upstream process)
     },
 }
 
@@ -249,6 +348,147 @@ def _sum_scope(em_cols: list, df_out, prefixes: list) -> list:
         return [0.0] * len(df_out)
     return [round(float(x), 6) for x in df_out[cols].sum(axis=1).values]
 
+# ── Activity-based proportion fallback ───────────────────────────────────────
+# Maps subsector prefix → input column prefix that encodes per-category activity
+_ACTIVITY_COL_MAP: Dict[str, str] = {
+    "agrc": "n_agrc_",
+    "lvst": "pop_lvst_",
+    "lsmm": "frac_lsmm_",
+    "soil": "frac_soil_",
+    "waso": "frac_waso_",
+    "wali": "frac_wali_",
+    "trww": "frac_trww_",
+    "lndu": "area_lndu_",
+    "inen": "frac_inen_",
+}
+_ACTIVITY_SKIP = frozenset({"scalar", "initial", "total", "minimum", "maximum",
+                             "average", "default", "dummy", "none"})
+
+# Explicit category → input column for subsectors where no simple prefix works
+_EXPLICIT_CAT_MAP: Dict[str, Dict[str, str]] = {
+    "scoe": {
+        "residential":          "consumpinit_scoe_gj_per_hh_residential_heat_energy",
+        "commercial_municipal": "consumpinit_scoe_tj_per_mmmgdp_commercial_municipal_heat_energy",
+        "other_se":             "consumpinit_scoe_tj_per_mmmgdp_other_se_heat_energy",
+    },
+    "entc": {
+        "pp_coal":       "nemomod_entc_residual_capacity_pp_coal_gw",
+        "pp_gas":        "nemomod_entc_residual_capacity_pp_gas_gw",
+        "pp_hydropower": "nemomod_entc_residual_capacity_pp_hydropower_gw",
+        "pp_solar":      "nemomod_entc_residual_capacity_pp_solar_gw",
+        "pp_wind":       "nemomod_entc_residual_capacity_pp_wind_gw",
+        "pp_nuclear":    "nemomod_entc_residual_capacity_pp_nuclear_gw",
+        "pp_oil":        "nemomod_entc_residual_capacity_pp_oil_gw",
+        "pp_biomass":    "nemomod_entc_residual_capacity_pp_biomass_gw",
+        "pp_geothermal": "nemomod_entc_residual_capacity_pp_geothermal_gw",
+        "pp_biogas":     "nemomod_entc_residual_capacity_pp_biogas_gw",
+    },
+    # fgtv: use domestic fraction (1 - import_frac) as proxy for local production activity
+    "fgtv": {
+        "fuel_coal":        "frac_enfu_fuel_demand_imported_pj_fuel_coal",
+        "fuel_crude":       "frac_enfu_fuel_demand_imported_pj_fuel_crude",
+        "fuel_natural_gas": "frac_enfu_fuel_demand_imported_pj_fuel_natural_gas",
+        "fuel_oil":         "frac_enfu_fuel_demand_imported_pj_fuel_oil",
+    },
+}
+# fgtv proxy is import fraction → invert to get domestic production proxy
+_INVERT_PROXY = frozenset({"fgtv"})
+
+
+def _activity_based_detail(df_input, subsector_prefix: str, total_series: list) -> dict:
+    """Approximate per-category breakdown from input activity proportions.
+
+    Checks _EXPLICIT_CAT_MAP first (for subsectors with non-uniform column naming),
+    then falls back to _ACTIVITY_COL_MAP prefix scan.
+    Returns {} if fewer than 2 usable categories found.
+    """
+    n = len(total_series)
+    total_arr = np.array(total_series, dtype=float)
+
+    # ── Explicit column map ──────────────────────────────────────────────────
+    if subsector_prefix in _EXPLICIT_CAT_MAP:
+        cats: dict = {}
+        invert = subsector_prefix in _INVERT_PROXY
+        for cat, col in _EXPLICIT_CAT_MAP[subsector_prefix].items():
+            if col not in df_input.columns:
+                continue
+            vals = df_input[col].fillna(0.0).values.astype(float)
+            if invert:
+                vals = np.clip(1.0 - vals, 0.0, None)
+            if np.any(vals > 0):
+                cats[cat] = vals
+        if len(cats) < 2:
+            return {}
+        result: dict = {}
+        for yr_i in range(n):
+            yr_act = {c: max(0.0, float(v[yr_i])) for c, v in cats.items()}
+            yr_total = sum(yr_act.values())
+            for cat in cats:
+                frac = yr_act[cat] / yr_total if yr_total > 0 else 1.0 / len(cats)
+                result.setdefault(cat, []).append(round(float(total_arr[yr_i]) * frac, 6))
+        return result if len(result) >= 2 else {}
+
+    # ── Prefix scan fallback ─────────────────────────────────────────────────
+    col_prefix = _ACTIVITY_COL_MAP.get(subsector_prefix)
+    if not col_prefix:
+        return {}
+    cats = {}
+    for c in df_input.columns:
+        if not c.lower().startswith(col_prefix):
+            continue
+        cat = c[len(col_prefix):]
+        if not cat or any(s in cat.lower() for s in _ACTIVITY_SKIP):
+            continue
+        vals = df_input[c].fillna(0.0).values.astype(float)
+        if np.any(vals > 0):
+            cats[cat] = vals
+    if len(cats) < 2:
+        return {}
+    result = {}
+    for yr_i in range(n):
+        yr_act = {cat: max(0.0, float(v[yr_i])) for cat, v in cats.items()}
+        yr_total_act = sum(yr_act.values())
+        for cat in cats:
+            frac = yr_act[cat] / yr_total_act if yr_total_act > 0 else 1.0 / len(cats)
+            result.setdefault(cat, []).append(round(float(total_arr[yr_i]) * frac, 6))
+    return result if len(result) >= 2 else {}
+
+
+_GAS_SFXS = frozenset({
+    "co2", "ch4", "n2o", "co2e", "sf6", "hfc", "pfc", "hfcs", "pfcs",
+    "co2_equivalent", "gwp", "kg", "tonne", "mt", "emission",
+})
+
+def _extract_by_detail(em_cols: list, df_out, subsector_prefix: str) -> dict:
+    """Extract one time-series per fine-grained category within a subsector.
+
+    Column token immediately after '{subsector_prefix}_' is the category name;
+    tokens that are gas/unit names (co2, ch4, n2o …) terminate the category.
+    Returns {} when fewer than 2 distinct categories found (no drill-down value).
+    """
+    pfx = f"{subsector_prefix}_"
+    subcat: dict = {}
+    for c in em_cols:
+        lc = c.lower()
+        pos = lc.find(pfx)
+        if pos < 0:
+            continue
+        parts = lc[pos + len(pfx):].split("_")
+        cat_parts: list = []
+        for p in parts:
+            if p in _GAS_SFXS or p.isdigit():
+                break
+            cat_parts.append(p)
+        if not cat_parts:
+            continue
+        token = "_".join(cat_parts)
+        subcat.setdefault(token, []).append(c)
+    result = {
+        tok: [round(float(x), 6) for x in df_out[cols].sum(axis=1).values]
+        for tok, cols in subcat.items() if cols
+    }
+    return result if len(result) >= 2 else {}
+
 # ── Baseline loading ──────────────────────────────────────────────────────────
 MEXICO_CSV = Path(__file__).parent / "mexico_full_input.csv"
 
@@ -313,7 +553,9 @@ if _SECTOR_MODELS_OK:
                 _pfxs    = SECTOR_EMISSION_PREFIXES.get(_sname, [])
                 _em_cols = [
                     c for c in _df_out.columns
-                    if "emission" in c.lower() and any(p in c.lower() for p in _pfxs)
+                    if "emission" in c.lower()
+                    and "subsector_total" not in c.lower()
+                    and any(p in c.lower() for p in _pfxs)
                 ]
                 if _sname not in SECTOR_EM_COLS:
                     SECTOR_EM_COLS[_sname] = _em_cols
@@ -330,23 +572,24 @@ if _SECTOR_MODELS_OK:
                     sk: _sum_scope(_em_cols, _df_out, spfxs)
                     for sk, spfxs in _scope_map.items()
                 }
-                # Fine-grained sub-category breakdown (IPPU industrial sub-types)
+                # Fine-grained category breakdown — one level below subsector, all sectors
                 _by_detail: dict = {}
-                if _sname == "industrial":
-                    _ippu_cols = [c for c in _em_cols if "ippu" in c.lower()]
-                    _subcat: dict = {}
-                    for _c in _ippu_cols:
-                        _lc = _c.lower()
-                        _pos = _lc.find("ippu_")
-                        if _pos >= 0:
-                            _token = _lc[_pos + 5:].split("_")[0]
-                            if _token:
-                                _subcat.setdefault(_token, []).append(_c)
-                    for _token, _tcols in _subcat.items():
-                        if _tcols:
-                            _by_detail[_token] = [round(float(x), 6) for x in _df_out[_tcols].sum(axis=1).values]
-                    if _by_detail:
-                        print(f"[v2]   {_sname}/{_region}: IPPU sub-cats={sorted(_by_detail)}")
+                for _p in _pfxs:
+                    _pcols = [c for c in _em_cols if _p in c.lower()]
+                    if _pcols:
+                        # Try output column extraction first; fall back to input proportions
+                        _detail = _extract_by_detail(_pcols, _df_out, _p)
+                        if not _detail and _p in _by_sub:
+                            _detail = _activity_based_detail(_bl["df"], _p, _by_sub[_p])
+                        if _detail:
+                            _by_detail[_p] = _detail
+                    elif _p in _by_sub:
+                        # No output columns at all — still try input proportions
+                        _detail = _activity_based_detail(_bl["df"], _p, _by_sub[_p])
+                        if _detail:
+                            _by_detail[_p] = _detail
+                if _by_detail:
+                    print(f"[v2]   {_sname}/{_region}: by_detail subsectors={sorted(_by_detail)}")
                 SECTOR_BL_OUTPUTS[_region][_sname] = {
                     "df_out": _df_out,
                     "total":  [round(float(x), 6) for x in _total.tolist()],
@@ -448,17 +691,14 @@ def _compute_transport_abatement(region: str, gas: str, policy_cfg: dict,
         "emission_type":          "exact",
     }
     if detailed:
+        bl_sc1 = _sum_modes(bl_s1, n); po_sc1 = _sum_modes(po_s1, n)
+        bl_sc2 = _sum_modes(bl_s2, n); po_sc2 = _sum_modes(po_s2, n)
+        bl_sc3 = _sum_modes(bl_s3, n); po_sc3 = _sum_modes(po_s3, n)
+        # scope_breakdown: flat abatement per scope (what frontend reads directly)
         out["scope_breakdown"] = {
-            "baseline": {
-                "scope1": [round(float(x), 6) for x in _sum_modes(bl_s1, n)],
-                "scope2": [round(float(x), 6) for x in _sum_modes(bl_s2, n)],
-                "scope3": [round(float(x), 6) for x in _sum_modes(bl_s3, n)],
-            },
-            "policy": {
-                "scope1": [round(float(x), 6) for x in _sum_modes(po_s1, n)],
-                "scope2": [round(float(x), 6) for x in _sum_modes(po_s2, n)],
-                "scope3": [round(float(x), 6) for x in _sum_modes(po_s3, n)],
-            },
+            "scope1": [round(float(b - p), 6) for b, p in zip(bl_sc1, po_sc1)],
+            "scope2": [round(float(b - p), 6) for b, p in zip(bl_sc2, po_sc2)],
+            "scope3": [round(float(b - p), 6) for b, p in zip(bl_sc3, po_sc3)],
         }
         out["by_mode"] = {
             "scope1": {m: {"baseline": bl_s1[m], "policy": po_s1[m]} for m in modes},
@@ -521,12 +761,15 @@ def _compute_true_sector_abatement(region: str, sector: str, policy_cfg: dict,
             po_sub = df_out_policy[p_cols_po].sum(axis=1).values.astype(float) if p_cols_po else bl_sub.copy()
             if abs(bl_sub).max() < 1e-9:
                 continue
+            _label = SUBSECTOR_LABELS.get(p, p.upper())
             categories.append({
-                "key":      p,
-                "name":     SUBSECTOR_LABELS.get(p, p.upper()),
-                "color":    SUBSECTOR_COLORS.get(p, "#64748b"),
-                "baseline": [round(float(x), 6) for x in bl_sub],
-                "policy":   [round(float(x), 6) for x in po_sub],
+                "key":       p,
+                "name":      _label,
+                "label":     _label,
+                "color":     SUBSECTOR_COLORS.get(p, "#64748b"),
+                "baseline":  [round(float(x), 6) for x in bl_sub],
+                "policy":    [round(float(x), 6) for x in po_sub],
+                "abatement": [round(float(b - po), 6) for b, po in zip(bl_sub, po_sub)],
             })
         out["categories"] = sorted(categories,
             key=lambda c: abs(np.array(c["baseline"]).sum()), reverse=True)
@@ -599,11 +842,16 @@ async def list_sector_policies(sector: str):
     if not policies:
         raise HTTPException(404, f"No policies for sector '{sector}'")
     meta = SECTOR_META.get(sector, {"label": sector, "color": "#64748b"})
+    def _fmt(p):
+        d = {k: v for k, v in p.items() if k != "parameters"}
+        d.setdefault("label", d.get("name", d.get("id", "")))
+        return d
+
     return {
         "sector":   sector,
         "label":    meta["label"],
         "color":    meta["color"],
-        "policies": [{k: v for k, v in p.items() if k != "parameters"} for p in policies],
+        "policies": [_fmt(p) for p in policies],
     }
 
 
@@ -725,20 +973,213 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
         }
 
     bl_info = SECTOR_BL_OUTPUTS.get(region, {}).get(sector)
+
+    # Try on-demand computation if model exists but baseline wasn't pre-cached
+    if not bl_info:
+        _model = SECTOR_MODELS.get(sector)
+        if _model:
+            try:
+                bl_data = BASELINES.get(region, BASELINES["costa_rica"])
+                _df_out  = _model.project(bl_data["df"])
+                _pfxs    = SECTOR_EMISSION_PREFIXES.get(sector, [])
+                _em_cols = [
+                    c for c in _df_out.columns
+                    if "emission" in c.lower()
+                    and "subsector_total" not in c.lower()
+                    and any(p in c.lower() for p in _pfxs)
+                ]
+                _total_arr = (_df_out[_em_cols].sum(axis=1).values.astype(float)
+                              if _em_cols else np.zeros(n))
+                _by_sub: dict = {}
+                for _p in _pfxs:
+                    _pc = [c for c in _em_cols if _p in c.lower()]
+                    if _pc:
+                        _by_sub[_p] = [round(float(x), 6) for x in _df_out[_pc].sum(axis=1).values]
+                # Compute scope 1/2/3 using the same map as startup pre-caching
+                _scope_map = SECTOR_SCOPE_MAP.get(sector, {})
+                _scopes = {
+                    sk: _sum_scope(_em_cols, _df_out, spfxs)
+                    for sk, spfxs in _scope_map.items()
+                    if spfxs  # skip empty scope lists
+                }
+                _by_detail_od: dict = {}
+                for _p in _pfxs:
+                    _pc = [c for c in _em_cols if _p in c.lower()]
+                    _sub_series = _by_sub.get(_p, [])
+                    if _pc:
+                        _det = _extract_by_detail(_pc, _df_out, _p)
+                        if not _det and _sub_series:
+                            _det = _activity_based_detail(bl_data["df"], _p, _sub_series)
+                    elif _sub_series:
+                        _det = _activity_based_detail(bl_data["df"], _p, _sub_series)
+                    else:
+                        _det = {}
+                    if _det:
+                        _by_detail_od[_p] = _det
+                bl_info = {"df_out": _df_out,
+                           "total":  [round(float(x), 6) for x in _total_arr.tolist()],
+                           "by_sub": _by_sub,
+                           **({"by_detail": _by_detail_od} if _by_detail_od else {}),
+                           **_scopes}
+                SECTOR_BL_OUTPUTS.setdefault(region, {})[sector] = bl_info
+            except Exception as _ode:
+                print(f"[v2] on-demand baseline for {sector}/{region} failed: {_ode}")
+
     if bl_info:
-        resp = {
-            "sector": sector, "region": region, "years": years,
-            "emission_type": "exact",
-            "total":  bl_info["total"],
-            "by_sub": bl_info["by_sub"],
+        _df_out = bl_info["df_out"]
+        _pfxs   = SECTOR_EMISSION_PREFIXES.get(sector, [])
+
+        # All individual emission columns (exclude subsector totals to avoid double-counting)
+        _all_em = [c for c in _df_out.columns
+                   if "emission" in c.lower()
+                   and "subsector_total" not in c.lower()
+                   and any(p in c.lower() for p in _pfxs)]
+
+        # Filter to the requested gas; "all" keeps every gas column
+        _em_cols = [c for c in _all_em if f"_{gas}_" in c.lower()] if gas != "all" else _all_em
+
+        # Recompute totals from gas-filtered columns
+        _total_arr = (_df_out[_em_cols].sum(axis=1).values.astype(float)
+                      if _em_cols else np.zeros(n))
+
+        _by_sub: dict = {}
+        for _p in _pfxs:
+            _pc = [c for c in _em_cols if _p in c.lower()]
+            if _pc:
+                _by_sub[_p] = [round(float(x), 6) for x in _df_out[_pc].sum(axis=1).values]
+
+        _smap  = SECTOR_SCOPE_MAP.get(sector, {})
+        _scopes = {sk: _sum_scope(_em_cols, _df_out, spfxs)
+                   for sk, spfxs in _smap.items() if spfxs}
+        _by_mode_sub = {
+            sk: {p: _by_sub[p] for p in spfxs if p in _by_sub}
+            for sk, spfxs in _smap.items()
         }
-        for sk in ("scope1", "scope2", "scope3"):
-            if sk in bl_info:
-                resp[sk] = bl_info[sk]
-        if "by_detail" in bl_info:
-            resp["by_detail"] = bl_info["by_detail"]
+
+        # by_detail: prefer gas-specific columns (real SISEPUEDE per-gas breakdown),
+        # fall back to all-gas proportions only when a subsector has no gas-specific cols.
+        _bl_df: "pd.DataFrame" = BASELINES.get(region, BASELINES["costa_rica"])["df"]
+        _by_detail: dict = {}
+        for _p in _pfxs:
+            _sub_total = _by_sub.get(_p, [])
+            if not _sub_total:
+                continue
+            _pc_gas = [c for c in _em_cols if _p in c.lower()]   # gas-specific for this sub
+            _pc_all = [c for c in _all_em if _p in c.lower()]     # all-gas fallback
+            if _pc_gas:
+                _det = _extract_by_detail(_pc_gas, _df_out, _p)
+                if not _det:
+                    _det = _activity_based_detail(_bl_df, _p, _sub_total)
+            elif _pc_all:
+                # subsector emits in other gases but not this one — use all-gas proportions
+                _det = _extract_by_detail(_pc_all, _df_out, _p)
+                if not _det:
+                    _det = _activity_based_detail(_bl_df, _p, _sub_total)
+            else:
+                _det = _activity_based_detail(_bl_df, _p, _sub_total)
+            if _det:
+                _by_detail[_p] = _det
+
+        resp = {
+            "sector": sector, "region": region, "gas": gas, "years": years,
+            "emission_type": "exact",
+            "total":   [round(float(x), 6) for x in _total_arr.tolist()],
+            "by_sub":  _by_sub,
+            "by_mode": _by_mode_sub,
+            **_scopes,
+        }
+        if _by_detail:
+            resp["by_detail"] = _by_detail
         return resp
-    raise HTTPException(503, f"Baseline not yet available for '{sector}' / '{region}'")
+
+    # Proxy fallback when no sector model is available
+    _proxy_scale = {
+        "agriculture": 5_000_000.0,
+        "waste":       1_000_000.0,
+        "energy":     10_000_000.0,
+        "industrial":  1_500_000.0,
+    }.get(sector, 1_000_000.0)
+    # Approximate gas fraction of total CO2e by sector (IPCC AR6 typical shares)
+    _GAS_PROXY_FRAC: Dict[str, Dict[str, float]] = {
+        "transport":   {"co2": 0.97, "ch4": 0.01, "n2o": 0.02},
+        "energy":      {"co2": 0.72, "ch4": 0.18, "n2o": 0.10},
+        "agriculture": {"co2": 0.03, "ch4": 0.55, "n2o": 0.42},
+        "waste":       {"co2": 0.03, "ch4": 0.82, "n2o": 0.15},
+        "industrial":  {"co2": 0.88, "ch4": 0.04, "n2o": 0.08},
+    }
+    _gas_frac = _GAS_PROXY_FRAC.get(sector, {}).get(gas, 1.0) if gas != "all" else 1.0
+    _total_proxy = np.linspace(_proxy_scale * 0.8, _proxy_scale, n) * _gas_frac
+    _pfxs = SECTOR_EMISSION_PREFIXES.get(sector, [])
+    _split = max(len(_pfxs), 1)
+    _by_sub_proxy = {
+        p: [round(float(x / _split), 6) for x in _total_proxy]
+        for p in _pfxs
+    }
+    # Build proxy scopes and by_mode — split total proportionally by subsector count per scope
+    _scope_map   = SECTOR_SCOPE_MAP.get(sector, {})
+    _proxy_scopes: dict = {}
+    _proxy_by_mode: dict = {}
+    if _scope_map:
+        _total_mapped = sum(len(v) for v in _scope_map.values() if v)
+        _total_mapped = max(_total_mapped, 1)
+        for sk, spfxs in _scope_map.items():
+            if spfxs:
+                frac = len(spfxs) / _total_mapped
+                per_sub = frac / len(spfxs)
+                _proxy_scopes[sk] = [round(float(x * frac), 6) for x in _total_proxy]
+                _proxy_by_mode[sk] = {
+                    p: [round(float(x * per_sub), 6) for x in _total_proxy]
+                    for p in spfxs
+                }
+            else:
+                _proxy_by_mode[sk] = {}
+    # Build by_detail from input proportions even in proxy mode
+    _bl_df = BASELINES.get(region, BASELINES["costa_rica"])["df"]
+    _proxy_by_detail: dict = {}
+    for _p in _pfxs:
+        _sub_series = _by_sub_proxy.get(_p, [])
+        if _sub_series:
+            _det = _activity_based_detail(_bl_df, _p, _sub_series)
+            if _det:
+                _proxy_by_detail[_p] = _det
+
+    return {
+        "sector":        sector,
+        "region":        region,
+        "years":         years,
+        "emission_type": "proxy",
+        "total":         [round(float(x), 6) for x in _total_proxy],
+        "by_sub":        _by_sub_proxy,
+        "by_mode":       _proxy_by_mode,
+        **({"by_detail": _proxy_by_detail} if _proxy_by_detail else {}),
+        **_proxy_scopes,
+    }
+
+
+@app.get("/v2/debug/columns/{sector}")
+async def debug_columns(sector: str, region: str = "costa_rica"):
+    """Debug: return actual emission column names and by_detail keys for a sector."""
+    em_cols = SECTOR_EM_COLS.get(sector, [])
+    bl_info = SECTOR_BL_OUTPUTS.get(region, {}).get(sector, {})
+    bl_df   = BASELINES.get(region, BASELINES["costa_rica"])["df"]
+    pfxs    = SECTOR_EMISSION_PREFIXES.get(sector, [])
+
+    activity_cols = {}
+    for p in pfxs:
+        col_prefix = _ACTIVITY_COL_MAP.get(p)
+        if col_prefix:
+            activity_cols[p] = [c for c in bl_df.columns if c.lower().startswith(col_prefix)]
+
+    return {
+        "sector":          sector,
+        "region":          region,
+        "em_col_count":    len(em_cols),
+        "em_cols_sample":  em_cols[:30],
+        "by_sub_keys":     list(bl_info.get("by_sub", {}).keys()),
+        "by_detail_keys":  {k: list(v.keys()) for k, v in bl_info.get("by_detail", {}).items()},
+        "activity_col_map": activity_cols,
+        "models_loaded":   list(SECTOR_MODELS.keys()),
+    }
 
 
 @app.get("/v2/net-zero/policies")
@@ -748,9 +1189,11 @@ async def get_net_zero_policies():
     for sector, policies in ALL_POLICIES.items():
         meta = SECTOR_META.get(sector, {"label": sector, "color": "#64748b"})
         for p in policies:
+            _label = p.get("label") or p.get("name") or p["id"]
             all_pols.append({
                 "id":                     p["id"],
-                "name":                   p["name"],
+                "name":                   _label,
+                "label":                  _label,
                 "sector":                 sector,
                 "sector_label":           meta["label"],
                 "sector_color":           meta["color"],
@@ -808,8 +1251,50 @@ async def run_net_zero_batch(request: BatchRequest):
                 {pool.submit(run_one, s, p): f"{s}::{p['id']}" for s, p in all_tasks})):
             (errors if "error" in out else results)[pid] = out
 
-    return {"region": request.region, "gas": request.gas,
-            "years": years, "results": results, "errors": errors}
+    # Aggregate baseline (one per sector) and total abatement across all policies
+    n_ts = len(years)
+    sector_bl: dict = {}
+    for pid, out in results.items():
+        sec = out.get("sector", "")
+        if sec and sec not in sector_bl and out.get("baseline"):
+            sector_bl[sec] = np.array(out["baseline"], dtype=float)
+
+    if sector_bl:
+        baseline_arr = sum(sector_bl.values())
+    else:
+        baseline_arr = np.zeros(n_ts)
+
+    total_abat = np.zeros(n_ts)
+    for out in results.values():
+        ab = out.get("abatement")
+        if ab and len(ab) == n_ts:
+            total_abat += np.array(ab, dtype=float)
+
+    with_all_arr = np.maximum(0.0, baseline_arr - total_abat)
+
+    policies_list = [
+        {
+            "id":                     pid.split("::", 1)[-1],
+            "label":                  out.get("name", pid),
+            "sector":                 out.get("sector", ""),
+            "sector_label":           out.get("sector_label", ""),
+            "sector_color":           out.get("sector_color", "#64748b"),
+            "total_abatement":        out.get("final_abatement_tonnes", 0),
+            "default_capex_per_tco2": out.get("capex_per_tco2", 50),
+        }
+        for pid, out in results.items()
+    ]
+
+    return {
+        "region":            request.region,
+        "gas":               request.gas,
+        "years":             years,
+        "baseline":          [round(float(x), 6) for x in baseline_arr],
+        "with_all_policies": [round(float(x), 6) for x in with_all_arr],
+        "policies":          policies_list,
+        "results":           results,
+        "errors":            errors,
+    }
 
 
 @app.get("/v2/transformers")
