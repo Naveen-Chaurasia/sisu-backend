@@ -13,6 +13,6 @@ BATCH_SIZE = int(os.getenv("BATCH_SIZE", "500"))
 
 # App user credentials — override via APP_USERS_<NAME>=<password> env vars
 USERS: dict[str, str] = {
-    "naveen": os.getenv("APP_PASSWORD_NAVEEN", "Su3y7kads#93"),
+    "naveen": os.getenv("APP_PASSWORD_NAVEEN", "Naveen"),
     "baz":    os.getenv("APP_PASSWORD_BAZ",    "Su3y7kads#93"),
 }
