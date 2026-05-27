@@ -213,6 +213,7 @@ ED_TJ_PER_LITRE = {
 }
 _ED_FALLBACK = 3.50e-5
 
+# IPCC AR5 CO2 factors (kg/TJ). Used ONLY for CO2 in Transport.
 CO2_KG_PER_TJ = {
     "diesel": 74100.0, "gasoline": 69300.0, "kerosene": 71500.0,
     "natural_gas": 56100.0, "biofuels": 0.0,
@@ -277,6 +278,7 @@ def _build_efficiency_lookup(df, modes, fuels):
     return lookup
 
 def _build_gas_ef_lookup(df, gas, modes, fuels):
+    """Reads CH4/N2O EFs from SISEPUEDE columns."""
     n = len(df)
     return {
         (mode, fuel): (
@@ -288,10 +290,16 @@ def _build_gas_ef_lookup(df, gas, modes, fuels):
     }
 
 def _build_co2_ef_lookup(modes, fuels, n):
+    """Generates CO2 EFs from Physics Constants."""
     return {(mode, fuel): np.full(n, float(CO2_KG_PER_TJ.get(fuel, 0.0)))
             for mode in modes for fuel in fuels}
 
-def _scope1_by_mode(df, proxies, gas_ef_lookup, eff_lookup, modes, fuels):
+def _scope1_by_mode(df, proxies, gas_ef_lookup, eff_lookup, modes, fuels, gas_type="co2"):
+    """
+    Calculates Scope 1.
+    If gas_type is 'co2', gas_ef_lookup should be constants.
+    If gas_type is 'ch4'/'n2o', gas_ef_lookup should be from DF columns.
+    """
     n = len(df); result = {}
     for mode in modes:
         proxy = proxies.get(mode, np.ones(n) * 100)
@@ -304,12 +312,18 @@ def _scope1_by_mode(df, proxies, gas_ef_lookup, eff_lookup, modes, fuels):
                 continue
             frac = df[frac_col].fillna(0.0).values
             eff  = eff_lookup.get((mode, fuel), np.full(n, 3.0))
-            em  += frac * (proxy / np.maximum(eff, 1e-9)) * ED_TJ_PER_LITRE.get(fuel, _ED_FALLBACK) * gas_ef_lookup.get((mode, fuel), np.zeros(n))
+            # Use the provided lookup (either constant or column-based)
+            ef_val = gas_ef_lookup.get((mode, fuel), np.zeros(n))
+            em  += frac * (proxy / np.maximum(eff, 1e-9)) * ED_TJ_PER_LITRE.get(fuel, _ED_FALLBACK) * ef_val
         result[mode] = (em / 1e3).tolist()
     return result
 
-def _scope2_by_mode(df, proxies, eff_lookup, modes, grid_ef):
+def _scope2_by_mode(df, proxies, eff_lookup, modes, grid_ef, gas_type="co2"):
+    """Scope 2 is typically only CO2 (Grid Electricity)."""
     n = len(df); result = {}
+    if gas_type != "co2":
+        return {m: [0.0] * n for m in modes}
+        
     for mode in modes:
         proxy = proxies.get(mode, np.ones(n) * 100)
         frac_col = f"frac_trns_fuelmix_{mode}_electricity"
@@ -320,8 +334,12 @@ def _scope2_by_mode(df, proxies, eff_lookup, modes, grid_ef):
         result[mode] = (frac * (proxy / np.maximum(eff, 1e-9)) * grid_ef / 1e3).tolist()
     return result
 
-def _scope3_by_mode(df, proxies, eff_lookup, modes, fuels):
+def _scope3_by_mode(df, proxies, eff_lookup, modes, fuels, gas_type="co2"):
+    """Scope 3 is typically only CO2 (Upstream Fuel Chain)."""
     n = len(df); result = {}
+    if gas_type != "co2":
+        return {m: [0.0] * n for m in modes}
+
     for mode in modes:
         proxy = proxies.get(mode, np.ones(n) * 100)
         em = np.zeros(n)
@@ -331,7 +349,9 @@ def _scope3_by_mode(df, proxies, eff_lookup, modes, fuels):
                 continue
             frac = df[frac_col].fillna(0.0).values
             eff  = eff_lookup.get((mode, fuel), np.full(n, 3.0))
-            em  += frac * (proxy / np.maximum(eff, 1e-9)) * ED_TJ_PER_LITRE.get(fuel, _ED_FALLBACK) * CO2_KG_PER_TJ.get(fuel, 0.0) * UPSTREAM_MULTIPLIER.get(fuel, 0.15)
+            # Upstream is proportional to CO2 content
+            co2_ef = CO2_KG_PER_TJ.get(fuel, 0.0)
+            em  += frac * (proxy / np.maximum(eff, 1e-9)) * ED_TJ_PER_LITRE.get(fuel, _ED_FALLBACK) * co2_ef * UPSTREAM_MULTIPLIER.get(fuel, 0.15)
         result[mode] = (em / 1e3).tolist()
     return result
 
@@ -396,12 +416,7 @@ _INVERT_PROXY = frozenset({"fgtv"})
 
 
 def _activity_based_detail(df_input, subsector_prefix: str, total_series: list) -> dict:
-    """Approximate per-category breakdown from input activity proportions.
-
-    Checks _EXPLICIT_CAT_MAP first (for subsectors with non-uniform column naming),
-    then falls back to _ACTIVITY_COL_MAP prefix scan.
-    Returns {} if fewer than 2 usable categories found.
-    """
+    """Approximate per-category breakdown from input activity proportions."""
     n = len(total_series)
     total_arr = np.array(total_series, dtype=float)
 
@@ -460,12 +475,7 @@ _GAS_SFXS = frozenset({
 })
 
 def _extract_by_detail(em_cols: list, df_out, subsector_prefix: str) -> dict:
-    """Extract one time-series per fine-grained category within a subsector.
-
-    Column token immediately after '{subsector_prefix}_' is the category name;
-    tokens that are gas/unit names (co2, ch4, n2o …) terminate the category.
-    Returns {} when fewer than 2 distinct categories found (no drill-down value).
-    """
+    """Extract one time-series per fine-grained category within a subsector."""
     pfx = f"{subsector_prefix}_"
     subcat: dict = {}
     for c in em_cols:
@@ -560,45 +570,13 @@ if _SECTOR_MODELS_OK:
                 if _sname not in SECTOR_EM_COLS:
                     SECTOR_EM_COLS[_sname] = _em_cols
                     print(f"[v2]   {_sname}: {len(_em_cols)} emission cols")
-                _total = (_df_out[_em_cols].sum(axis=1).values
-                          if _em_cols else np.zeros(len(_df_out)))
-                _by_sub = {}
-                for _p in _pfxs:
-                    _pcols = [c for c in _em_cols if _p in c.lower()]
-                    if _pcols:
-                        _by_sub[_p] = [round(float(x), 6) for x in _df_out[_pcols].sum(axis=1).values]
-                _scope_map = SECTOR_SCOPE_MAP.get(_sname, {})
-                _scopes = {
-                    sk: _sum_scope(_em_cols, _df_out, spfxs)
-                    for sk, spfxs in _scope_map.items()
-                }
-                # Fine-grained category breakdown — one level below subsector, all sectors
-                _by_detail: dict = {}
-                for _p in _pfxs:
-                    _pcols = [c for c in _em_cols if _p in c.lower()]
-                    if _pcols:
-                        # Try output column extraction first; fall back to input proportions
-                        _detail = _extract_by_detail(_pcols, _df_out, _p)
-                        if not _detail and _p in _by_sub:
-                            _detail = _activity_based_detail(_bl["df"], _p, _by_sub[_p])
-                        if _detail:
-                            _by_detail[_p] = _detail
-                    elif _p in _by_sub:
-                        # No output columns at all — still try input proportions
-                        _detail = _activity_based_detail(_bl["df"], _p, _by_sub[_p])
-                        if _detail:
-                            _by_detail[_p] = _detail
-                if _by_detail:
-                    print(f"[v2]   {_sname}/{_region}: by_detail subsectors={sorted(_by_detail)}")
+                
+                # Note: We cache the DF and cols, but we calculate totals dynamically in the endpoint
+                # based on the requested gas.
                 SECTOR_BL_OUTPUTS[_region][_sname] = {
                     "df_out": _df_out,
-                    "total":  [round(float(x), 6) for x in _total.tolist()],
-                    "by_sub": _by_sub,
-                    **({"by_detail": _by_detail} if _by_detail else {}),
-                    **_scopes,
+                    "prefixes": _pfxs
                 }
-                print(f"[v2]   {_sname}/{_region}: baseline peak={_total.max():.4f}"
-                      + (f" scopes={list(_scopes)}" if _scopes else ""))
             except Exception as _e:
                 print(f"[v2] {_sname}/{_region} baseline failed: {_e}")
 
@@ -658,20 +636,29 @@ def _compute_transport_abatement(region: str, gas: str, policy_cfg: dict,
     df_input   = bl["df"]
     modes      = bl["modes"]; fuels = bl["fuels"]
     proxies    = bl["proxies"]; eff_lk = bl["eff_lookup"]
-    gas_ef     = bl["gas_ef_lookups"].get(gas, bl["gas_ef_lookups"]["co2"])
+    
+    # Get correct EF lookup based on gas
+    if gas == "co2":
+        gas_ef = bl["gas_ef_lookups"]["co2"]
+    else:
+        gas_ef = bl["gas_ef_lookups"].get(gas, {k: np.zeros(len(df_input)) for k in bl["gas_ef_lookups"]["co2"].keys()})
+        
     grid_ef    = GRID_EF_KG_CO2_PER_KWH.get(region, _GRID_EF_FALLBACK)
     n          = len(df_input)
 
+    # For baseline, we freeze EFs to t=0 to keep baseline flat
     frozen_gas_ef  = {k: np.full(n, float(v[0])) for k, v in gas_ef.items()}
+    
     df_result      = trf.Transformation(policy_cfg, bl["transformers"])()
     eff_lk_policy  = _build_efficiency_lookup(df_result, modes, fuels)
 
-    bl_s1 = _scope1_by_mode(df_input,  proxies, frozen_gas_ef, eff_lk,        modes, fuels)
-    bl_s2 = _scope2_by_mode(df_input,  proxies, eff_lk,        modes, grid_ef)
-    bl_s3 = _scope3_by_mode(df_input,  proxies, eff_lk,        modes, fuels)
-    po_s1 = _scope1_by_mode(df_result, proxies, gas_ef,        eff_lk_policy, modes, fuels)
-    po_s2 = _scope2_by_mode(df_result, proxies, eff_lk_policy, modes, grid_ef)
-    po_s3 = _scope3_by_mode(df_result, proxies, eff_lk_policy, modes, fuels)
+    bl_s1 = _scope1_by_mode(df_input,  proxies, frozen_gas_ef, eff_lk,        modes, fuels, gas)
+    bl_s2 = _scope2_by_mode(df_input,  proxies, eff_lk,        modes, grid_ef, gas)
+    bl_s3 = _scope3_by_mode(df_input,  proxies, eff_lk,        modes, fuels, gas)
+    
+    po_s1 = _scope1_by_mode(df_result, proxies, gas_ef,        eff_lk_policy, modes, fuels, gas)
+    po_s2 = _scope2_by_mode(df_result, proxies, eff_lk_policy, modes, grid_ef, gas)
+    po_s3 = _scope3_by_mode(df_result, proxies, eff_lk_policy, modes, fuels, gas)
 
     bl_arr = _sum_modes(bl_s1, n) + _sum_modes(bl_s2, n) + _sum_modes(bl_s3, n)
     po_arr = _sum_modes(po_s1, n) + _sum_modes(po_s2, n) + _sum_modes(po_s3, n)
@@ -694,7 +681,6 @@ def _compute_transport_abatement(region: str, gas: str, policy_cfg: dict,
         bl_sc1 = _sum_modes(bl_s1, n); po_sc1 = _sum_modes(po_s1, n)
         bl_sc2 = _sum_modes(bl_s2, n); po_sc2 = _sum_modes(po_s2, n)
         bl_sc3 = _sum_modes(bl_s3, n); po_sc3 = _sum_modes(po_s3, n)
-        # scope_breakdown: flat abatement per scope (what frontend reads directly)
         out["scope_breakdown"] = {
             "scope1": [round(float(b - p), 6) for b, p in zip(bl_sc1, po_sc1)],
             "scope2": [round(float(b - p), 6) for b, p in zip(bl_sc2, po_sc2)],
@@ -708,13 +694,13 @@ def _compute_transport_abatement(region: str, gas: str, policy_cfg: dict,
     return out
 
 # ── True sector abatement (SISEPUEDE sector model.project()) ──────────────────
-def _compute_true_sector_abatement(region: str, sector: str, policy_cfg: dict,
+def _compute_true_sector_abatement(region: str, sector: str, gas: str, policy_cfg: dict,
                                     detailed: bool = False) -> dict:
     bl_info  = SECTOR_BL_OUTPUTS.get(region, {}).get(sector)
-    em_cols  = SECTOR_EM_COLS.get(sector, [])
+    em_cols_all  = SECTOR_EM_COLS.get(sector, [])
     model    = SECTOR_MODELS.get(sector)
 
-    if not model or not bl_info or not em_cols:
+    if not model or not bl_info or not em_cols_all:
         return _compute_generic_abatement(region, policy_cfg)
 
     bl   = BASELINES.get(region, BASELINES["costa_rica"])
@@ -729,11 +715,18 @@ def _compute_true_sector_abatement(region: str, sector: str, policy_cfg: dict,
         return _compute_generic_abatement(region, policy_cfg)
 
     df_out_bl = bl_info["df_out"]
-    bl_arr    = df_out_bl[em_cols].sum(axis=1).values.astype(float)
+    
+    # Filter columns by GAS
+    target_gas = gas.lower()
+    em_cols_bl = [c for c in em_cols_all if f"_{target_gas}_" in c.lower()]
+    em_cols_po = [c for c in df_out_policy.columns if "emission" in c.lower() and f"_{target_gas}_" in c.lower()]
 
-    # Filter to only columns present in policy output too
-    shared_cols = [c for c in em_cols if c in df_out_policy.columns]
-    po_arr      = df_out_policy[shared_cols].sum(axis=1).values.astype(float) if shared_cols else bl_arr.copy()
+    # Fallback if no specific gas columns found
+    if not em_cols_bl: em_cols_bl = [c for c in em_cols_all if "emission" in c.lower()]
+    if not em_cols_po: em_cols_po = [c for c in df_out_policy.columns if "emission" in c.lower()]
+
+    bl_arr    = df_out_bl[em_cols_bl].sum(axis=1).values.astype(float)
+    po_arr    = df_out_policy[em_cols_po].sum(axis=1).values.astype(float) if em_cols_po else np.zeros(n)
 
     abatement = bl_arr - po_arr
     final_bl  = float(bl_arr[-1]); final_ab = float(abatement[-1])
@@ -753,14 +746,15 @@ def _compute_true_sector_abatement(region: str, sector: str, policy_cfg: dict,
         prefixes = SECTOR_EMISSION_PREFIXES.get(sector, [])
         categories = []
         for p in prefixes:
-            p_cols = [c for c in em_cols if p in c.lower()]
-            if not p_cols:
-                continue
-            bl_sub = df_out_bl[p_cols].sum(axis=1).values.astype(float)
-            p_cols_po = [c for c in p_cols if c in df_out_policy.columns]
-            po_sub = df_out_policy[p_cols_po].sum(axis=1).values.astype(float) if p_cols_po else bl_sub.copy()
-            if abs(bl_sub).max() < 1e-9:
-                continue
+            p_cols_bl = [c for c in em_cols_bl if p in c.lower()]
+            p_cols_po = [c for c in em_cols_po if p in c.lower()]
+            if not p_cols_bl: continue
+            
+            bl_sub = df_out_bl[p_cols_bl].sum(axis=1).values.astype(float)
+            po_sub = df_out_policy[p_cols_po].sum(axis=1).values.astype(float) if p_cols_po else np.zeros(n)
+            
+            if abs(bl_sub).max() < 1e-9: continue
+            
             _label = SUBSECTOR_LABELS.get(p, p.upper())
             categories.append({
                 "key":       p,
@@ -880,7 +874,7 @@ async def run_sector_batch(sector: str, request: BatchRequest):
             if is_transport:
                 out = _compute_transport_abatement(request.region, request.gas, cfg)
             elif has_true_model:
-                out = _compute_true_sector_abatement(request.region, sector, cfg)
+                out = _compute_true_sector_abatement(request.region, sector, request.gas, cfg)
             else:
                 out = _compute_generic_abatement(request.region, cfg)
             out.update({
@@ -931,7 +925,7 @@ async def run_sector_policy(sector: str, request: PolicyRequest):
     elif (sector in SECTOR_MODELS and
           request.region in SECTOR_BL_OUTPUTS and
           sector in SECTOR_BL_OUTPUTS.get(request.region, {})):
-        result = _compute_true_sector_abatement(request.region, sector, cfg, detailed=True)
+        result = _compute_true_sector_abatement(request.region, sector, request.gas, cfg, detailed=True)
     else:
         result = _compute_generic_abatement(request.region, cfg)
 
@@ -950,20 +944,29 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
     bl    = BASELINES.get(region, BASELINES["costa_rica"])
     n     = len(bl["df"])
     years = _make_years(n)
+    target_gas = gas.lower()
 
     if sector == "transport":
         modes   = bl["modes"]; fuels = bl["fuels"]
         proxies = bl["proxies"]; eff_lk = bl["eff_lookup"]
-        gas_ef  = bl["gas_ef_lookups"].get(gas, bl["gas_ef_lookups"]["co2"])
+        
+        # Select correct EF lookup
+        if target_gas == "co2":
+            gas_ef = bl["gas_ef_lookups"]["co2"]
+        else:
+            gas_ef = bl["gas_ef_lookups"].get(target_gas, {k: np.zeros(n) for k in bl["gas_ef_lookups"]["co2"].keys()})
+            
         grid_ef = GRID_EF_KG_CO2_PER_KWH.get(region, _GRID_EF_FALLBACK)
         frozen  = {k: np.full(n, float(v[0])) for k, v in gas_ef.items()}
+        
         df_in   = bl["df"]
-        s1 = _scope1_by_mode(df_in, proxies, frozen, eff_lk, modes, fuels)
-        s2 = _scope2_by_mode(df_in, proxies, eff_lk, modes, grid_ef)
-        s3 = _scope3_by_mode(df_in, proxies, eff_lk, modes, fuels)
+        s1 = _scope1_by_mode(df_in, proxies, frozen, eff_lk, modes, fuels, target_gas)
+        s2 = _scope2_by_mode(df_in, proxies, eff_lk, modes, grid_ef, target_gas)
+        s3 = _scope3_by_mode(df_in, proxies, eff_lk, modes, fuels, target_gas)
+        
         total = _sum_modes(s1, n) + _sum_modes(s2, n) + _sum_modes(s3, n)
         return {
-            "sector": sector, "region": region, "years": years,
+            "sector": sector, "region": region, "years": years, "gas": target_gas,
             "emission_type": "exact",
             "total":  [round(float(x), 6) for x in total],
             "scope1": [round(float(x), 6) for x in _sum_modes(s1, n)],
@@ -988,23 +991,28 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
                     and "subsector_total" not in c.lower()
                     and any(p in c.lower() for p in _pfxs)
                 ]
-                _total_arr = (_df_out[_em_cols].sum(axis=1).values.astype(float)
-                              if _em_cols else np.zeros(n))
+                SECTOR_EM_COLS[sector] = _em_cols
+                
+                # Calculate totals dynamically based on gas
+                _gas_em_cols = [c for c in _em_cols if f"_{target_gas}_" in c.lower()]
+                if not _gas_em_cols: _gas_em_cols = _em_cols # Fallback
+
+                _total_arr = (_df_out[_gas_em_cols].sum(axis=1).values.astype(float) if _gas_em_cols else np.zeros(n))
                 _by_sub: dict = {}
                 for _p in _pfxs:
-                    _pc = [c for c in _em_cols if _p in c.lower()]
+                    _pc = [c for c in _gas_em_cols if _p in c.lower()]
                     if _pc:
                         _by_sub[_p] = [round(float(x), 6) for x in _df_out[_pc].sum(axis=1).values]
-                # Compute scope 1/2/3 using the same map as startup pre-caching
+                
                 _scope_map = SECTOR_SCOPE_MAP.get(sector, {})
                 _scopes = {
-                    sk: _sum_scope(_em_cols, _df_out, spfxs)
+                    sk: _sum_scope(_gas_em_cols, _df_out, spfxs)
                     for sk, spfxs in _scope_map.items()
-                    if spfxs  # skip empty scope lists
+                    if spfxs
                 }
                 _by_detail_od: dict = {}
                 for _p in _pfxs:
-                    _pc = [c for c in _em_cols if _p in c.lower()]
+                    _pc = [c for c in _gas_em_cols if _p in c.lower()]
                     _sub_series = _by_sub.get(_p, [])
                     if _pc:
                         _det = _extract_by_detail(_pc, _df_out, _p)
@@ -1016,6 +1024,7 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
                         _det = {}
                     if _det:
                         _by_detail_od[_p] = _det
+                        
                 bl_info = {"df_out": _df_out,
                            "total":  [round(float(x), 6) for x in _total_arr.tolist()],
                            "by_sub": _by_sub,
@@ -1027,7 +1036,7 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
 
     if bl_info:
         _df_out = bl_info["df_out"]
-        _pfxs   = SECTOR_EMISSION_PREFIXES.get(sector, [])
+        _pfxs   = bl_info["prefixes"]
 
         # All individual emission columns (exclude subsector totals to avoid double-counting)
         _all_em = [c for c in _df_out.columns
@@ -1036,7 +1045,11 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
                    and any(p in c.lower() for p in _pfxs)]
 
         # Filter to the requested gas; "all" keeps every gas column
-        _em_cols = [c for c in _all_em if f"_{gas}_" in c.lower()] if gas != "all" else _all_em
+        _em_cols = [c for c in _all_em if f"_{target_gas}_" in c.lower()] if target_gas != "all" else _all_em
+        
+        # If filtering resulted in empty list (e.g. asking for N2O but only CO2 exists), fallback to all
+        if not _em_cols and target_gas != "all":
+             _em_cols = _all_em
 
         # Recompute totals from gas-filtered columns
         _total_arr = (_df_out[_em_cols].sum(axis=1).values.astype(float)
@@ -1081,7 +1094,7 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
                 _by_detail[_p] = _det
 
         resp = {
-            "sector": sector, "region": region, "gas": gas, "years": years,
+            "sector": sector, "region": region, "gas": target_gas, "years": years,
             "emission_type": "exact",
             "total":   [round(float(x), 6) for x in _total_arr.tolist()],
             "by_sub":  _by_sub,
@@ -1107,7 +1120,7 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
         "waste":       {"co2": 0.03, "ch4": 0.82, "n2o": 0.15},
         "industrial":  {"co2": 0.88, "ch4": 0.04, "n2o": 0.08},
     }
-    _gas_frac = _GAS_PROXY_FRAC.get(sector, {}).get(gas, 1.0) if gas != "all" else 1.0
+    _gas_frac = _GAS_PROXY_FRAC.get(sector, {}).get(target_gas, 1.0) if target_gas != "all" else 1.0
     _total_proxy = np.linspace(_proxy_scale * 0.8, _proxy_scale, n) * _gas_frac
     _pfxs = SECTOR_EMISSION_PREFIXES.get(sector, [])
     _split = max(len(_pfxs), 1)
@@ -1146,6 +1159,7 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
     return {
         "sector":        sector,
         "region":        region,
+        "gas":           target_gas,
         "years":         years,
         "emission_type": "proxy",
         "total":         [round(float(x), 6) for x in _total_proxy],
@@ -1223,7 +1237,7 @@ async def run_net_zero_batch(request: BatchRequest):
             elif (sector in SECTOR_MODELS and
                   request.region in SECTOR_BL_OUTPUTS and
                   sector in SECTOR_BL_OUTPUTS.get(request.region, {})):
-                out = _compute_true_sector_abatement(request.region, sector, cfg)
+                out = _compute_true_sector_abatement(request.region, sector, gas, cfg)
             else:
                 out = _compute_generic_abatement(request.region, cfg)
             meta = SECTOR_META.get(sector, {})
