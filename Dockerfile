@@ -12,5 +12,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY api.py apiv2.py config.py mexico_full_input.csv start.py ./
 COPY policies/ ./policies/
+COPY mines/ ./mines/
 
 CMD ["python", "start.py"]
