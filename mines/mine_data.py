@@ -109,19 +109,45 @@ _MINE_11_ENV = [
 
 
 MINES: dict = {
-    "mine_1": _mine(
-        "mine_1", "Mine 1", "Chinaka Resource Mining 3", "7023L", "Zambezia",
-        "Rare Earths, Monazite", "Open Pit",
-        "Highest-grade rare earth deposit in the Zambezia corridor. Strong off-take interest from Asian processors.",
+    # "mine_1": _mine(
+    #     "mine_1", "Mine 1", "Chinaka Resource Mining 3", "7023L", "Zambezia",
+    #     "Rare Earths, Monazite", "Open Pit",
+    #     "Highest-grade rare earth deposit in the Zambezia corridor. Strong off-take interest from Asian processors.",
+    #     50_000_000, "Mt", 1_000_000,
+    #     [
+    #         {"name": "Rare Earths", "price": 220,  "price_unit": "$/kg", "grade": 20.0,  "grade_unit": "kg/t"},
+    #         {"name": "Monazite",    "price": 1000, "price_unit": "$/t",  "grade": 5.0,   "grade_unit": "kg/t"},
+    #     ],
+    #     15_000_000, 8_000_000, 0.02, 20, 0.40, 0.75,
+    #     0.32, 0.06, 20_000_000, 10, 0.08, 0.14, 8_000_000,
+    #     npv=2_686_000_000, irr=0.431, payback=3, moic=8.9,
+    #     total_revenue=19_170_000_000, total_fcf=7_640_000_000,
+    #     lat=-17.26, lng=36.89,
+    # ),
+     "mine_1": _mine(
+        "mine_1", "Mine 1", "Chinaka Resource Mining 3", 
+        "12891L",  # Fixed License Number
+        "Zambezia",
+        "Rare Earths, Monazite, Lithium",  # Added Lithium
+        "Open Pit",
+        "Highest strategic value due to rare earths and monazite.",  # Updated notes to match sheet
         50_000_000, "Mt", 1_000_000,
         [
             {"name": "Rare Earths", "price": 220,  "price_unit": "$/kg", "grade": 20.0,  "grade_unit": "kg/t"},
             {"name": "Monazite",    "price": 1000, "price_unit": "$/t",  "grade": 5.0,   "grade_unit": "kg/t"},
+            # Added Lithium to match spreadsheet
+            {"name": "Lithium",     "price": 10000,"price_unit": "$/t",  "grade": 1.5,   "grade_unit": "kg/t"}, 
         ],
         15_000_000, 8_000_000, 0.02, 20, 0.40, 0.75,
         0.32, 0.06, 20_000_000, 10, 0.08, 0.14, 8_000_000,
-        npv=2_686_000_000, irr=0.431, payback=3, moic=8.9,
-        total_revenue=19_170_000_000, total_fcf=7_640_000_000,
+        # Fixed Financials to match Spreadsheet Magnitude (Divided by 10)
+        npv=268_660_000,       # Was 2_686_000_000
+        irr=0.43,              # Matches 43%
+        payback=3,             # Matches 3
+        moic=8.9,              # Matches 8.9
+        total_revenue=1_917_162_500, # Was 19_170_000_000
+        total_fcf=764_190_000,       # Was 7_640_000_000
+        aisc=2687,             # Added from spreadsheet
         lat=-17.26, lng=36.89,
     ),
     "mine_2": _mine(
@@ -244,13 +270,29 @@ MINES: dict = {
         npv=298_000_000, irr=0.248, payback=5, moic=4.2,
         lat=-14.53, lng=38.97,
     ),
-    "mine_11": _mine(
+    # "mine_11": _mine(
+    #     "mine_11", "Mine 11", "M'Gomo Mine", "9015L", "Tete",
+    #     "Gold", "Open Pit",
+    #     "Highest strategic value gold project in the Tete corridor. Shallow, free-milling ore body with low strip ratio. Fully licensed with ESIA approved.",
+    #     31_891_000, "m³", 636_480,
+    #     [
+    #         {"name": "Gold", "price": 48000, "price_unit": "$/kg", "grade": 0.24, "grade_unit": "g/m³"},
+    #     ],
+    #     1_823_760, 4_195_422, 0.00, 15, 0.40, 0.75,
+    #     0.32, 0.06, 10_000_000, 10, 0.08, 0.14, 5_000_000,
+    #     risks=_MINE_11_RISKS,
+    #     environmental=_MINE_11_ENV,
+    #     notes="Primary gold asset. ESIA approved. Offtake discussions underway with two Swiss refiners.",
+    #     lat=-15.83, lng=32.72,
+    # ),
+        "mine_11": _mine(
         "mine_11", "Mine 11", "M'Gomo Mine", "9015L", "Tete",
         "Gold", "Open Pit",
-        "Highest strategic value gold project in the Tete corridor. Shallow, free-milling ore body with low strip ratio. Fully licensed with ESIA approved.",
+        "Primary gold asset. ESIA approved. Offtake discussions underway with two Swiss refiners.", # Updated note
         31_891_000, "m³", 636_480,
         [
-            {"name": "Gold", "price": 48000, "price_unit": "$/kg", "grade": 0.24, "grade_unit": "g/m³"},
+            # Fixed Grade: 27,940 kg / 636,480 m³ ≈ 43.9 g/m³
+            {"name": "Gold", "price": 48000, "price_unit": "$/kg", "grade": 43.9, "grade_unit": "g/m³"},
         ],
         1_823_760, 4_195_422, 0.00, 15, 0.40, 0.75,
         0.32, 0.06, 10_000_000, 10, 0.08, 0.14, 5_000_000,
@@ -258,6 +300,14 @@ MINES: dict = {
         environmental=_MINE_11_ENV,
         notes="Primary gold asset. ESIA approved. Offtake discussions underway with two Swiss refiners.",
         lat=-15.83, lng=32.72,
+        # Hardcoded Financials from Spreadsheet
+        npv=67_550_650,          # ~67.55 Million
+        irr=0.39,                # 39%
+        payback=4,               # 4 Years
+        moic=12.5988,            # 12.6x
+        total_revenue=360_380_068, # ~360.38 Million
+        total_fcf=80_971_209,      # ~80.97 Million
+        aisc=7508,               # $7,508/kg
     ),
 }
 
