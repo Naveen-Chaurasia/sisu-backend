@@ -165,3 +165,86 @@ JOIN mine_commodities c ON c.id = s.commodity_id
 JOIN mines m            ON m.id = c.mine_id
 LEFT JOIN scenario_metrics sm ON sm.scenario_id = s.id
 ORDER BY m.mine_name, c.commodity, s.scenario;
+
+
+
+UPDATE mines
+SET mine_name = CASE mine_name
+  WHEN 'Chinaka Resource Mining 3' THEN 'Mine C3'
+  WHEN 'M''Gomo Mine'              THEN 'Mine G'
+END
+WHERE mine_name IN ('Chinaka Resource Mining 3', 'M''Gomo Mine');
+
+-- Run in Supabase Dashboard → SQL Editor
+ALTER TABLE mines
+  ADD COLUMN IF NOT EXISTS primary_minerals      TEXT,
+  ADD COLUMN IF NOT EXISTS mine_type             TEXT,
+  ADD COLUMN IF NOT EXISTS prospectivity_notes   TEXT,
+  ADD COLUMN IF NOT EXISTS status                TEXT DEFAULT 'Active',
+  ADD COLUMN IF NOT EXISTS ramp_up_y1            NUMERIC DEFAULT 0.5,
+  ADD COLUMN IF NOT EXISTS ramp_up_y2            NUMERIC DEFAULT 0.8,
+  ADD COLUMN IF NOT EXISTS ramp_up_y3            NUMERIC DEFAULT 1.0,
+  ADD COLUMN IF NOT EXISTS initial_dev_capex     NUMERIC,
+  ADD COLUMN IF NOT EXISTS total_opex_steady_state NUMERIC,
+  ADD COLUMN IF NOT EXISTS cost_per_ore_m3       NUMERIC,
+  ADD COLUMN IF NOT EXISTS variable_cost_per_unit NUMERIC,
+  ADD COLUMN IF NOT EXISTS opex_escalation_rate  NUMERIC DEFAULT 0.02,
+  ADD COLUMN IF NOT EXISTS avg_depreciation_years INT,
+  ADD COLUMN IF NOT EXISTS royalty_rate          NUMERIC DEFAULT 0.03,
+  ADD COLUMN IF NOT EXISTS debt_funding          NUMERIC DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS debt_term             INT     DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS interest_rate         NUMERIC DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS closure_rehab_cost    NUMERIC DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS risk_factors          JSONB   DEFAULT '[]',
+  ADD COLUMN IF NOT EXISTS environmental_impacts JSONB   DEFAULT '[]';
+
+
+
+  -- Add missing columns to commodity_scenarios
+ALTER TABLE commodity_scenarios
+  ADD COLUMN IF NOT EXISTS annual_production NUMERIC,
+  ADD COLUMN IF NOT EXISTS grade             NUMERIC,
+  ADD COLUMN IF NOT EXISTS grade_unit        TEXT DEFAULT 'g/t',
+  ADD COLUMN IF NOT EXISTS recovery_rate     NUMERIC DEFAULT 0.85;
+
+-- Add missing columns to mines (for DCF engine inputs)
+ALTER TABLE mines
+  ADD COLUMN IF NOT EXISTS is_user_created          BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS initial_dev_capex        NUMERIC,
+  ADD COLUMN IF NOT EXISTS total_opex_steady_state  NUMERIC,
+  ADD COLUMN IF NOT EXISTS opex_escalation_rate     NUMERIC DEFAULT 0.02,
+  ADD COLUMN IF NOT EXISTS avg_depreciation_years   NUMERIC,
+  ADD COLUMN IF NOT EXISTS ramp_up_y1               NUMERIC DEFAULT 0.5,
+  ADD COLUMN IF NOT EXISTS ramp_up_y2               NUMERIC DEFAULT 0.8,
+  ADD COLUMN IF NOT EXISTS ramp_up_y3               NUMERIC DEFAULT 1.0,
+  ADD COLUMN IF NOT EXISTS closure_rehab_cost       NUMERIC,
+  ADD COLUMN IF NOT EXISTS royalty_rate             NUMERIC DEFAULT 0.03,
+  ADD COLUMN IF NOT EXISTS ore_reserve              NUMERIC,
+  ADD COLUMN IF NOT EXISTS reserve_unit             TEXT DEFAULT 'Mt',
+  ADD COLUMN IF NOT EXISTS throughput_pa            NUMERIC,
+  ADD COLUMN IF NOT EXISTS throughput_unit          TEXT DEFAULT 'Mtpa',
+  ADD COLUMN IF NOT EXISTS primary_minerals         TEXT,
+  ADD COLUMN IF NOT EXISTS mine_type                TEXT,
+  ADD COLUMN IF NOT EXISTS status                   TEXT,
+  ADD COLUMN IF NOT EXISTS prospectivity_notes      TEXT,
+  ADD COLUMN IF NOT EXISTS country                  TEXT,
+  ADD COLUMN IF NOT EXISTS concession_area_ha       NUMERIC,
+  ADD COLUMN IF NOT EXISTS debt_funding             NUMERIC,
+  ADD COLUMN IF NOT EXISTS debt_term                NUMERIC,
+  ADD COLUMN IF NOT EXISTS interest_rate            NUMERIC,
+  ADD COLUMN IF NOT EXISTS variable_cost_per_unit   NUMERIC,
+  ADD COLUMN IF NOT EXISTS cost_per_ore_m3          NUMERIC,
+  ADD COLUMN IF NOT EXISTS risk_factors             JSONB DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS environmental_impacts    JSONB DEFAULT '[]'::jsonb;
+
+
+ALTER TABLE dcf_years ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'ingested';
+UPDATE dcf_years SET source = 'ingested' WHERE source IS NULL;
+ALTER TABLE dcf_years DROP CONSTRAINT IF EXISTS dcf_years_scenario_id_year_key;
+ALTER TABLE dcf_years ADD CONSTRAINT dcf_years_scenario_source_year UNIQUE (scenario_id, source, year);
+CREATE TABLE IF NOT EXISTS user_scenario_metrics (
+  scenario_id   UUID PRIMARY KEY REFERENCES commodity_scenarios(id) ON DELETE CASCADE,
+  npv NUMERIC, irr NUMERIC, payback TEXT, moic NUMERIC,
+  total_capex NUMERIC, total_lom_fcf NUMERIC,
+  calculated_at TIMESTAMPTZ DEFAULT now()
+);
