@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY api.py apiv2.py config.py mexico_full_input.csv start.py ./
+COPY api.py apiv2.py config.py mexico_full_input.csv uganda_full_input.csv start.py ./
 COPY policies/ ./policies/
-COPY mines/ ./mines/
+COPY mines4/ ./mines4/
 
 CMD ["python", "start.py"]
