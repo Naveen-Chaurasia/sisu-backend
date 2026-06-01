@@ -2,6 +2,7 @@
 api_m4.py — FastAPI for mines4 (schema_v4 / m4_* tables)
 ==========================================================
 Mount at /mines4 in start.py.
+# v2
 
 Supports:
   • Multiple commodities per mine
@@ -70,15 +71,14 @@ def _irr(fcfs: list) -> Optional[float]:
     if not any(f < -0.001 for f in fcfs) or not any(f > 0.001 for f in fcfs):
         return None
     if _HAS_NPF:
-        # numpy_financial uses Newton-Raphson from guess=0.1, matching Excel's IRR()
         try:
             r = npf.irr(fcfs)
-            if r is None or r != r:  # nan check
-                return None
-            return float(r)
+            # npf.irr can converge to a spurious negative root; only accept positive results
+            if r is not None and r == r and float(r) >= 0:
+                return float(r)
         except Exception:
             pass
-    # Fallback: Newton-Raphson with guess=0.1 (same as Excel), avoids spurious negative roots
+    # Newton-Raphson from guess=0.1 (same as Excel) — finds the economically meaningful positive root
     def npv_f(r):
         try:
             return sum(cf / (1.0 + r) ** t for t, cf in enumerate(fcfs))
