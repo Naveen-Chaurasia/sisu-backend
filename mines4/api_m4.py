@@ -341,10 +341,8 @@ def list_mines():
     comm_map  = {c["id"]: c for c in all_comms}
     mines_map = {m["id"]: m for m in mines}
 
-    # Auto-calculate and cache metrics for any scenario missing valid npv
+    # Always recalculate metrics to avoid stale cached values (e.g. wrong IRR)
     for s in all_scens:
-        if met_map.get(s["id"], {}).get("npv") is not None:
-            continue
         comm = comm_map.get(s["commodity_id"], {})
         mine = mines_map.get(comm.get("mine_id"))
         if not mine:
