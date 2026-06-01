@@ -425,44 +425,94 @@ def _calc_irr_py(fcfs: list):
 
 
 def _run_dcf(mine: dict, scenario: dict):
-    """Compute year-by-year DCF rows and summary metrics from mine + scenario inputs."""
-    wacc     = float(scenario.get("wacc") or mine.get("wacc") or 0.15)
-    tax      = float(mine.get("tax_rate") or 0.32)
-    royalty  = float(mine.get("royalty_rate") or 0.03)
-    lom      = int(mine.get("life_of_mine_yr") or 15)
-    price    = float(scenario.get("price_base") or 0)
-    ann_prod = float(scenario.get("annual_production") or 0)
-    dev_cap  = float(mine.get("initial_dev_capex") or 0)
-    opex_ss  = float(mine.get("total_opex_steady_state") or 0)
-    opex_esc = float(mine.get("opex_escalation_rate") or 0.02)
-    dep_yrs  = max(1, int(mine.get("avg_depreciation_years") or lom))
-    closure  = float(mine.get("closure_rehab_cost") or 0)
-    ramps    = [
+    """
+    Compute year-by-year DCF rows and summary metrics.
+    Per-scenario fields (schema_v3) take priority over mine-level fallbacks.
+    """
+    def _f(key_scen, key_mine=None, default=0.0):
+        v = scenario.get(key_scen)
+        if v is not None:
+            return float(v)
+        if key_mine:
+            v = mine.get(key_mine)
+            if v is not None:
+                return float(v)
+        return float(default)
+
+    wacc          = _f("wacc",                 "wacc",                    0.15)
+    tax           = float(mine.get("tax_rate") or 0.32)
+    royalty       = _f("royalty_rate",         "royalty_rate",            0.03)
+    lom           = int(mine.get("life_of_mine_yr") or 15)
+    price0        = _f("price_base",           None,                      0.0)
+    price_esc     = _f("price_escalation_rate", None,                     0.0)
+    ann_prod      = _f("annual_production",    None,                      0.0)
+    dev_cap       = _f("initial_capex",        "initial_dev_capex",       0.0)
+    sust_capex    = _f("sustaining_capex_pa",  None,                      0.0)
+    opex_ss       = _f("opex",                 "total_opex_steady_state", 0.0)
+    opex_esc      = _f("opex_escalation_rate", "opex_escalation_rate",    0.02)
+    closure       = float(mine.get("closure_rehab_cost") or 0)
+    capex_yr      = int(scenario.get("capex_deployment_year") or 0)
+    prod_start    = int(scenario.get("production_start_year") or 1)
+    ramps         = [
         float(mine.get("ramp_up_y1") or 0.5),
         float(mine.get("ramp_up_y2") or 0.8),
         float(mine.get("ramp_up_y3") or 1.0),
     ]
 
+    # Depreciation: use explicit dep_pa if set, else spread dev_cap over dep_years
+    dep_pa_explicit = scenario.get("depreciation_pa")
+    dep_yrs         = max(1, int(mine.get("avg_depreciation_years") or lom))
+    dep_pa_computed = dev_cap / dep_yrs if dev_cap > 0 else 0.0
+    dep_pa          = float(dep_pa_explicit) if dep_pa_explicit is not None else dep_pa_computed
+
     rows, cum_fcf = [], 0.0
     for t in range(lom + 1):
-        rf      = 0.0 if t == 0 else (ramps[t-1] if t <= 3 else 1.0)
+        # Production ramp-up (relative to production_start_year)
+        t_prod = t - prod_start + 1  # years since production started
+        if t < prod_start:
+            rf = 0.0
+        elif t_prod <= 3:
+            rf = ramps[t_prod - 1]
+        else:
+            rf = 1.0
+
+        price   = price0 * ((1 + price_esc) ** max(0, t - prod_start)) if t >= prod_start else price0
         prod    = ann_prod * rf
         gr      = prod * price
         roy_amt = gr * royalty
         net_rev = gr - roy_amt
-        opex    = opex_ss * rf * ((1 + opex_esc) ** max(0, t - 1)) if t > 0 else 0.0
+
+        # OPEX escalates from production start
+        if t < prod_start:
+            opex = 0.0
+        else:
+            opex = opex_ss * rf * ((1 + opex_esc) ** max(0, t_prod - 1))
+
         ebitda  = net_rev - opex
-        dep     = dev_cap / dep_yrs if 0 < t <= dep_yrs else 0.0
+
+        # Depreciation applies from year after capex deployment
+        dep_start = capex_yr + 1
+        dep = dep_pa if dep_start <= t <= (dep_start + dep_yrs - 1) else 0.0
+
         ebit    = ebitda - dep
         tax_amt = max(0.0, ebit * tax)
-        capex   = (-dev_cap if t == 0 else 0.0) + (-closure if t == lom and closure > 0 else 0.0)
+
+        # CAPEX: initial at capex_yr, sustaining from production start, closure at end
+        capex = 0.0
+        if t == capex_yr:
+            capex -= dev_cap
+        if t >= prod_start and sust_capex > 0:
+            capex -= sust_capex
+        if t == lom and closure > 0:
+            capex -= closure
+
         fcf     = ebit - tax_amt + dep + capex
         cum_fcf += fcf
         df      = 1.0 / (1.0 + wacc) ** t
         rows.append({
             "year": t,
             "production":       round(prod, 4),
-            "commodity_price":  price,
+            "commodity_price":  round(price, 4),
             "gross_revenue":    round(gr, 2),
             "royalty":          round(roy_amt, 2),
             "net_revenue":      round(net_rev, 2),
@@ -575,8 +625,14 @@ def delete_commodity(mine_id: str, comm_id: str):
 # ─────────────────────────────────────────────────────────────────────────────
 # PATCH /mines/{mine_id}/scenarios/{scen_id}  —  update price / grade / production
 # ─────────────────────────────────────────────────────────────────────────────
-_SCEN_PATCHABLE = {"wacc","price_base","price_unit","basis_notes","annual_production",
-                   "grade","grade_unit","recovery_rate","scenario","sheet_name"}
+_SCEN_PATCHABLE = {
+    "wacc","price_base","price_unit","basis_notes","annual_production",
+    "grade","grade_unit","recovery_rate","scenario","sheet_name",
+    # per-scenario DCF inputs (schema_v3)
+    "price_escalation_rate","opex","opex_escalation_rate","initial_capex",
+    "sustaining_capex_pa","depreciation_pa","capex_deployment_year",
+    "production_start_year","royalty_rate",
+}
 
 @app.patch("/mines/{mine_id}/scenarios/{scen_id}")
 def patch_scenario(mine_id: str, scen_id: str, body: Dict[str, Any] = Body(...)):

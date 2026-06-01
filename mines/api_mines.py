@@ -16,10 +16,20 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from mines.mine_data import (
-    MINES, MINERALS_REFERENCE,
-    get_all_mines, get_mine, upsert_mine, _summary,
-)
+from mines.mine_data_supabase import get_all_mines, get_mine, upsert_mine, _summary
+
+# Static reference table — not stored in DB
+MINERALS_REFERENCE = [
+    {"mineral": "Rare Earths",  "market_price": 220,    "price_unit": "$/kg", "avg_ore_grade": 2.0,  "grade_unit": "%",     "avg_recovery_rate": 70},
+    {"mineral": "Lithium",      "market_price": 10000,  "price_unit": "$/t",  "avg_ore_grade": 2.0,  "grade_unit": "%",     "avg_recovery_rate": 85},
+    {"mineral": "Spodumene",    "market_price": 850,    "price_unit": "$/t",  "avg_ore_grade": 2.0,  "grade_unit": "%",     "avg_recovery_rate": 70},
+    {"mineral": "Lepidolite",   "market_price": 400,    "price_unit": "$/t",  "avg_ore_grade": 1.5,  "grade_unit": "%",     "avg_recovery_rate": 60},
+    {"mineral": "Copper",       "market_price": 9000,   "price_unit": "$/t",  "avg_ore_grade": 0.08, "grade_unit": "%",     "avg_recovery_rate": 80},
+    {"mineral": "Graphite",     "market_price": 500,    "price_unit": "$/t",  "avg_ore_grade": 10.0, "grade_unit": "%",     "avg_recovery_rate": 80},
+    {"mineral": "Monazite",     "market_price": 1000,   "price_unit": "$/t",  "avg_ore_grade": 0.5,  "grade_unit": "%",     "avg_recovery_rate": 70},
+    {"mineral": "Gold",         "market_price": 3200,   "price_unit": "$/oz", "avg_ore_grade": 0.01, "grade_unit": "%",     "avg_recovery_rate": 90},
+    {"mineral": "Tantalite",    "market_price": 150,    "price_unit": "$/lb", "avg_ore_grade": 0.025,"grade_unit": "%",     "avg_recovery_rate": 65},
+]
 
 app = FastAPI(title="Mines Investment Modeling API")
 app.add_middleware(
@@ -57,17 +67,44 @@ def _irr(cashflows: list, guess: float = 0.1, tol: float = 1e-7, maxiter: int = 
 
 # ── Core DCF engine ───────────────────────────────────────────────────────────
 
+def _normalize_mine(mine: dict) -> dict:
+    """
+    Map v1_mines field names → legacy run_dcf field names so the engine
+    works with both old synthetic data and new Supabase rows.
+    Also synthesizes the 'minerals' list from flat v1_mines commodity fields.
+    """
+    m = dict(mine)
+    # Field aliases (v1_mines → legacy)
+    if "ore_reserve"   in m and "total_ore_reserve"      not in m:
+        m["total_ore_reserve"]       = m["ore_reserve"]
+    if "throughput_pa" in m and "steady_state_throughput" not in m:
+        m["steady_state_throughput"] = m["throughput_pa"]
+    if "tax_rate"      in m and "corp_income_tax_rate"    not in m:
+        m["corp_income_tax_rate"]    = m["tax_rate"]
+
+    # Synthesize minerals list from flat fields if absent
+    if not m.get("minerals") and m.get("commodity"):
+        m["minerals"] = [{
+            "name":  m.get("commodity", "Unknown"),
+            "grade": float(m.get("grade") or 0),
+            "price": float(m.get("price_base") or 0),
+        }]
+    return m
+
+
 def run_dcf(mine: dict) -> dict:
     """
     Compute full year-by-year DCF table and summary metrics.
     Returns dict with 'years' list and 'rows' dict (row_name → list of values).
+    Accepts both v1_mines (Supabase) and legacy synthetic mine dicts.
     """
-    ore_reserve  = mine["total_ore_reserve"]
-    throughput   = mine["steady_state_throughput"]
-    lom          = max(1, round(ore_reserve / throughput))
+    mine         = _normalize_mine(mine)
+    ore_reserve  = mine.get("total_ore_reserve") or 0
+    throughput   = mine.get("steady_state_throughput") or 1
+    lom          = max(1, round(ore_reserve / throughput)) if ore_reserve and throughput else mine.get("life_of_mine_yr", 15)
     minerals     = mine.get("minerals", [])
-    capex        = mine["initial_dev_capex"]
-    opex_ss      = mine["total_opex_steady_state"]
+    capex        = mine.get("initial_dev_capex", 0)
+    opex_ss      = mine.get("total_opex_steady_state", 0)
     opex_esc     = mine.get("opex_escalation_rate", 0.0)
     depr_life    = mine.get("avg_depreciation_years", 15)
     ramp1        = mine.get("ramp_up_y1", 0.40)
@@ -294,19 +331,15 @@ def run_dcf(mine: dict) -> dict:
         "life_of_mine":   lom,
     }
 
-    # Store in MINES for registry + profile re-fetch
-    MINES[mine["id"]].update({
-        "npv":                         npv,
-        "irr":                         irr,
-        "payback_period":              payback,
-        "moic":                        moic,
-        "total_lom_revenue":           total_revenue,
-        "total_lom_fcf":               total_fcf_val,
-        "total_lom_minerals_produced": total_minerals,
-        "aisc":                        aisc,
-        "dcf_rows":                    dcf_rows,
-        "summary":                     fe_summary,
-    })
+    # Persist summary metrics back to v1_mines (best-effort — ignore errors)
+    mine_id = mine.get("id")
+    if mine_id:
+        try:
+            upsert_mine(mine_id, {
+                "npv": npv, "irr": irr, "moic": moic,
+            })
+        except Exception:
+            pass
 
     return {
         "mine_id":  mine["id"],
@@ -525,23 +558,19 @@ class MineCreateRequest(BaseModel):
 
 @app.post("/mines/")
 def create_mine(req: MineCreateRequest):
-    existing_ids = [k for k in MINES.keys() if k.startswith("mine_")]
-    nums = [int(k.replace("mine_", "")) for k in existing_ids if k.replace("mine_", "").isdigit()]
-    new_num = max(nums, default=0) + 1
-    new_id  = f"mine_{new_num}"
     data = req.dict()
-    data["id"] = new_id
+    data.pop("id", None)           # let Supabase generate UUID
     data["country"] = "Mozambique"
-    upsert_mine(new_id, data)
-    return get_mine(new_id)
+    data["is_user_created"] = True
+    new = upsert_mine(None, data)  # None → INSERT, returns saved row
+    return new
 
 
 @app.put("/mines/{mine_id}")
 def update_mine(mine_id: str, req: MineCreateRequest):
-    if mine_id not in MINES:
+    if get_mine(mine_id) is None:
         raise HTTPException(404, f"Mine '{mine_id}' not found")
     data = req.dict()
-    data["id"] = mine_id
     data["country"] = "Mozambique"
     upsert_mine(mine_id, data)
     return get_mine(mine_id)
@@ -556,9 +585,8 @@ def calculate_mine(mine_id: str, req: CalcRequest = None):
     m = get_mine(mine_id)
     if m is None:
         raise HTTPException(404, f"Mine '{mine_id}' not found")
-    run_dcf(m)
-    # Re-fetch from MINES store so dcf_rows + summary are embedded
-    return {"mine": get_mine(mine_id)}
+    result = run_dcf(m)
+    return {"mine": get_mine(mine_id), "dcf": result}
 
 
 class MonteCarloRequest(BaseModel):
