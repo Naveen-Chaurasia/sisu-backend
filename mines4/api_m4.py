@@ -80,15 +80,23 @@ def _irr(fcfs: list) -> Optional[float]:
             pass
     # Fallback: Newton-Raphson with guess=0.1 (same as Excel), avoids spurious negative roots
     def npv_f(r):
-        return sum(cf / (1.0 + r) ** t for t, cf in enumerate(fcfs))
+        try:
+            return sum(cf / (1.0 + r) ** t for t, cf in enumerate(fcfs))
+        except (OverflowError, ZeroDivisionError):
+            return float("inf")
     def dnpv(r):
-        return sum(-t * cf / (1.0 + r) ** (t + 1) for t, cf in enumerate(fcfs))
+        try:
+            return sum(-t * cf / (1.0 + r) ** (t + 1) for t, cf in enumerate(fcfs))
+        except (OverflowError, ZeroDivisionError):
+            return float("inf")
     r = 0.10  # start at 10% like Excel
     for _ in range(100):
         f  = npv_f(r)
         df = dnpv(r)
+        if not math.isfinite(f) or not math.isfinite(df): break
         if abs(df) < 1e-12: break
         r2 = r - f / df
+        r2 = max(-0.9999, min(r2, 100.0))  # clamp — prevents overflow on next iteration
         if abs(r2 - r) < 1e-8: return r2
         r = r2
     return r if abs(npv_f(r)) < 1.0 else None
