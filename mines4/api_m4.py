@@ -14,10 +14,16 @@ Supports:
 """
 import copy, math, os, random
 from typing import Any, Dict, List, Optional
+try:
+    import numpy_financial as npf
+    _HAS_NPF = True
+except ImportError:
+    _HAS_NPF = False
 
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
+from mines4.mask_utils import build_mask_map, mask_mine
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL",
     "https://snbnqwrxvptrfjsecljd.supabase.co")
@@ -63,23 +69,29 @@ def _get_metrics_map(scen_ids: list):
 def _irr(fcfs: list) -> Optional[float]:
     if not any(f < -0.001 for f in fcfs) or not any(f > 0.001 for f in fcfs):
         return None
-    def npv(r):
+    if _HAS_NPF:
+        # numpy_financial uses Newton-Raphson from guess=0.1, matching Excel's IRR()
+        try:
+            r = npf.irr(fcfs)
+            if r is None or r != r:  # nan check
+                return None
+            return float(r)
+        except Exception:
+            pass
+    # Fallback: Newton-Raphson with guess=0.1 (same as Excel), avoids spurious negative roots
+    def npv_f(r):
         return sum(cf / (1.0 + r) ** t for t, cf in enumerate(fcfs))
-    lo = -0.45
-    vlo = npv(lo)
-    hi = None
-    for h in [0.3, 0.8, 1.5, 3.0, 6.0, 15.0]:
-        if vlo * npv(h) <= 0: hi = h; break
-    if hi is None: return None
-    a, b, va = lo, hi, vlo
-    for _ in range(80):
-        mid = (a + b) / 2
-        if b - a < 1e-8: return mid
-        vm = npv(mid)
-        if abs(vm) < 0.01: return mid
-        if va * vm <= 0: b = mid
-        else: a, va = mid, vm
-    return (a + b) / 2
+    def dnpv(r):
+        return sum(-t * cf / (1.0 + r) ** (t + 1) for t, cf in enumerate(fcfs))
+    r = 0.10  # start at 10% like Excel
+    for _ in range(100):
+        f  = npv_f(r)
+        df = dnpv(r)
+        if abs(df) < 1e-12: break
+        r2 = r - f / df
+        if abs(r2 - r) < 1e-8: return r2
+        r = r2
+    return r if abs(npv_f(r)) < 1.0 else None
 
 
 def _f(s, k_scen, mine, k_mine=None, default=0.0):
@@ -267,13 +279,17 @@ def run_dcf(mine: dict, scen: dict) -> tuple:
 
     # ── Summary metrics ─────────────────────────────────────────────────────────
     fcfs    = [r["free_cash_flow"] for r in rows]
-    npv     = sum(r["discounted_cf"] for r in rows)
     irr     = _irr(fcfs)
     payback = next((r["year"] for r in rows if r["cumulative_fcf"] >= 0 and r["year"] > 0), None)
 
-    # MOIC = sum(positive FCFs) / abs(sum(negative FCFs))
-    neg_sum = sum(-f for f in fcfs if f < 0) or 1
-    pos_sum = sum( f for f in fcfs if f > 0)
+    # NPV: match Excel convention — Years 0..min(20, lom) only
+    # Excel: =NPV(wacc, Y1:Y20) + Y0  (only first 20 years count, post-Y20 FCFs excluded)
+    npv_horizon = min(20, lom)
+    npv = sum(r["discounted_cf"] for r in rows if r["year"] <= npv_horizon)
+
+    # MOIC: match Excel = SUM(net_income Y1..LOM) / -SUM(capex all years)
+    net_income_sum  = sum(r["nopat"] for r in rows if r["year"] > 0)
+    total_capex_abs = abs(sum(r["capex"] for r in rows))
 
     # Total LOM Revenue
     total_lom_revenue = sum(r["gross_revenue"] for r in rows)
@@ -295,8 +311,8 @@ def run_dcf(mine: dict, scen: dict) -> tuple:
     metrics = {
         "npv":                    round(npv / 1e6, 4),
         "irr":                    round(irr, 6) if irr is not None else None,
-        "payback":                f"{payback} yr" if payback else "Beyond LOM",
-        "moic":                   round(pos_sum / neg_sum, 4),
+        "payback":                payback if payback else None,
+        "moic":                   round(net_income_sum / total_capex_abs, 4) if total_capex_abs > 0 else 0.0,
         "total_capex":            round(abs(sum(r["capex"] for r in rows)) / 1e6, 4),
         "total_lom_fcf":          round(sum(fcfs) / 1e6, 4),
         "total_lom_revenue":      round(total_lom_revenue / 1e6, 4),
@@ -354,11 +370,12 @@ def list_mines():
                 "moic":    m.get("moic"),   "payback": m.get("payback"),
             }
 
+    mask_map = build_mask_map(client)
     result = []
     for mine in mines:
         comms   = [c for c in all_comms if c["mine_id"] == mine["id"]]
         summary = mine_summary.get(mine["id"], {})
-        result.append({**mine, "commodities": comms, **summary})
+        result.append({**mask_mine(mine, mask_map), "commodities": comms, **summary})
     return {"mines": result}
 
 
@@ -378,7 +395,8 @@ def get_mine(mine_id: str):
         scen_by_comm.setdefault(s["commodity_id"], []).append(s)
     for c in comms:
         c["scenarios"] = scen_by_comm.get(c["id"], [])
-    return {**mine, "commodities": comms}
+    mask_map = build_mask_map(sb())
+    return {**mask_mine(mine, mask_map), "commodities": comms}
 
 
 # ── PATCH /mines/{mine_id} ────────────────────────────────────────────────────
@@ -396,8 +414,10 @@ def patch_mine(mine_id: str, body: Dict[str, Any] = Body(...)):
     _get_mine(mine_id)
     patch = {k: v for k, v in body.items() if k in _MINE_PATCHABLE}
     if not patch: raise HTTPException(400, "No valid fields")
-    sb().table("m4_mines").update(patch).eq("id", mine_id).execute()
-    return _get_mine(mine_id)
+    client = sb()
+    client.table("m4_mines").update(patch).eq("id", mine_id).execute()
+    updated = _data(client.table("m4_mines").select("*").eq("id", mine_id).limit(1).execute())[0]
+    return mask_mine(updated, build_mask_map(client))
 
 
 # ── POST /mines ───────────────────────────────────────────────────────────────
@@ -478,6 +498,40 @@ def patch_scenario(mine_id: str, scen_id: str, body: Dict[str, Any] = Body(...))
     return {"ok": True}
 
 
+# ── DELETE /mines/{mine_id}/scenarios/{scen_id} ───────────────────────────────
+@app.delete("/mines/{mine_id}/scenarios/{scen_id}")
+def delete_scenario(mine_id: str, scen_id: str):
+    client = sb()
+    # Verify scenario belongs to this mine via commodity
+    scen = _data(client.table("m4_scenarios").select("commodity_id").eq("id", scen_id).limit(1).execute())
+    if not scen: _raise("Scenario not found")
+    comm = _data(client.table("m4_commodities").select("mine_id").eq("id", scen[0]["commodity_id"]).limit(1).execute())
+    if not comm or comm[0]["mine_id"] != mine_id: _raise("Scenario does not belong to mine", 403)
+    client.table("m4_metrics").delete().eq("scenario_id", scen_id).execute()
+    client.table("m4_dcf_inputs").delete().eq("scenario_id", scen_id).execute()
+    client.table("m4_scenarios").delete().eq("id", scen_id).execute()
+    return {"ok": True}
+
+
+# ── DELETE /mines/{mine_id} ───────────────────────────────────────────────────
+@app.delete("/mines/{mine_id}")
+def delete_mine(mine_id: str):
+    client = sb()
+    # Cascade: metrics → scenarios → commodities → dcf_inputs → mine
+    comms    = _data(client.table("m4_commodities").select("id").eq("mine_id", mine_id).execute())
+    comm_ids = [c["id"] for c in comms]
+    if comm_ids:
+        scens    = _data(client.table("m4_scenarios").select("id").in_("commodity_id", comm_ids).execute())
+        scen_ids = [s["id"] for s in scens]
+        if scen_ids:
+            client.table("m4_metrics").delete().in_("scenario_id", scen_ids).execute()
+            client.table("m4_dcf_inputs").delete().in_("scenario_id", scen_ids).execute()
+            client.table("m4_scenarios").delete().in_("id", scen_ids).execute()
+        client.table("m4_commodities").delete().in_("id", comm_ids).execute()
+    client.table("m4_mines").delete().eq("id", mine_id).execute()
+    return {"ok": True, "deleted": mine_id}
+
+
 # ── GET /mines/{mine_id}/dcf/{scen_id} ────────────────────────────────────────
 @app.get("/mines/{mine_id}/dcf/{scen_id}")
 def get_dcf(mine_id: str, scen_id: str, source: str = "ingested"):
@@ -519,16 +573,15 @@ def get_scenarios(mine_id: str):
     met_map = _get_metrics_map(scen_ids)
     client = sb()
 
-    # Auto-calculate and cache any missing or incomplete metrics
+    # Always recalculate metrics from current inputs so cached stale values never surface
     for s in scens:
-        if met_map.get(s["id"], {}).get("npv") is None:
-            try:
-                _, calc_met = run_dcf(mine, s)
-                calc_met["scenario_id"] = s["id"]
-                client.table("m4_metrics").upsert(calc_met, on_conflict="scenario_id").execute()
-                met_map[s["id"]] = calc_met
-            except Exception:
-                pass
+        try:
+            _, calc_met = run_dcf(mine, s)
+            calc_met["scenario_id"] = s["id"]
+            client.table("m4_metrics").upsert(calc_met, on_conflict="scenario_id").execute()
+            met_map[s["id"]] = calc_met
+        except Exception:
+            pass
 
     # Return flat list with commodity + metrics merged in
     flat = []
@@ -543,8 +596,14 @@ def get_scenarios(mine_id: str):
             "irr":     m.get("irr"),
             "moic":    m.get("moic"),
             "payback": m.get("payback"),
-            "total_capex":   m.get("total_capex"),
-            "total_lom_fcf": m.get("total_lom_fcf"),
+            "total_capex":          m.get("total_capex"),
+            "total_lom_fcf":        m.get("total_lom_fcf"),
+            "total_lom_revenue":    m.get("total_lom_revenue"),
+            "total_mineral_produced": m.get("total_mineral_produced"),
+            "total_cost_per_unit":  m.get("total_cost_per_unit"),
+            "unit_margin_dollar":   m.get("unit_margin_dollar"),
+            "unit_margin_pct":      m.get("unit_margin_pct"),
+            "life_of_mine_yr":      m.get("life_of_mine_yr"),
         })
     return {"mine_id": mine_id, "scenarios": flat}
 
@@ -761,4 +820,5 @@ def exec_summary(mine_id: str):
     for r in exec_rows:
         sections.setdefault(r["section"] or "General", []).append(r)
 
-    return {"mine": mine, "scenario_returns": scenario_returns, "exec_sections": sections}
+    mask_map = build_mask_map(sb())
+    return {"mine": mask_mine(mine, mask_map), "scenario_returns": scenario_returns, "exec_sections": sections}

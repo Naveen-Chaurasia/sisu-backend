@@ -221,7 +221,7 @@ CO2_KG_PER_TJ = {
     "electricity": 0.0, "ammonia": 0.0,
 }
 
-GRID_EF_KG_CO2_PER_KWH = {"costa_rica": 0.020, "mexico": 0.454}
+GRID_EF_KG_CO2_PER_KWH = {"costa_rica": 0.020, "mexico": 0.454, "uganda": 0.091}
 _GRID_EF_FALLBACK = 0.400
 
 UPSTREAM_MULTIPLIER = {
@@ -501,6 +501,7 @@ def _extract_by_detail(em_cols: list, df_out, subsector_prefix: str) -> dict:
 
 # ── Baseline loading ──────────────────────────────────────────────────────────
 MEXICO_CSV = Path(__file__).parent / "mexico_full_input.csv"
+UGANDA_CSV = Path(__file__).parent / "uganda_full_input.csv"
 
 def _make_baseline(df, transformers):
     modes   = _detect_transport_modes(df)
@@ -530,9 +531,18 @@ except Exception as exc:
     print(f"  Mexico transformer init skipped: {exc.__class__.__name__}")
     _trf_mx = _trf_cr
 
+print("[v2] Loading Uganda baseline…")
+_df_ug = pd.read_csv(UGANDA_CSV)
+try:
+    _trf_ug = trfs.Transformers({}, df_input=_df_ug)
+except Exception as exc:
+    print(f"  Uganda transformer init skipped: {exc.__class__.__name__}")
+    _trf_ug = _trf_cr
+
 BASELINES = {
     "costa_rica": _make_baseline(_df_cr, _trf_cr),
     "mexico":     _make_baseline(_df_mx, _trf_mx),
+    "uganda":     _make_baseline(_df_ug, _trf_ug),
 }
 
 # ── Sector model initialization (Option A: true model.project() per sector) ───
