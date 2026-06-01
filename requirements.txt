@@ -3,5 +3,7 @@ uvicorn[standard]
 anthropic
 pandas
 numpy
+numpy-financial
 python-dotenv
+supabase
 git+https://github.com/jcsyme/sisepuede.git
