@@ -499,8 +499,12 @@ async def analyze(req: AnalyzeRequest):
             if s["val"] > 0
         ]
 
-    # Determine emission_type for the focused sector (or worst across all sectors)
-    _focus_et = summary["sectors"].get(focus_key, {}).get("emission_type", "unknown") if focus_key else "unknown"
+    # Determine emission_type for the focused sector
+    # topic_sector is always defined; focus_key only exists in the Haiku fallback path
+    _sector_key = topic_sector or (focus_key if "focus_key" in dir() else None)
+    _focus_et   = summary["sectors"].get(_sector_key, {}).get("emission_type", "unknown") if _sector_key else next(
+        (v.get("emission_type", "unknown") for v in summary.get("sectors", {}).values()), "unknown"
+    )
     _is_real  = _focus_et in ("exact", "sisepuede_real")
 
     return {
