@@ -68,6 +68,7 @@ SECTOR_EMISSION_PREFIXES: Dict[str, List[str]] = {
     "waste":       ["waso", "wali", "trww"],
     "energy":      ["inen", "scoe", "entc", "fgtv"],
     "industrial":  ["ippu"],
+    "transport":   ["trns"],   # extracted from energy_consumption df_out
 }
 
 SUBSECTOR_LABELS = {
@@ -590,6 +591,55 @@ if _SECTOR_MODELS_OK:
             except Exception as _e:
                 print(f"[v2] {_sname}/{_region} baseline failed: {_e}")
 
+        # ── Extract transport (trns) from energy df_out ──────────────────────
+        # EnergyConsumption model includes Transportation (TRNS) subsector.
+        # Store it as a separate "transport" entry with real emission values.
+        # _energy_bl = SECTOR_BL_OUTPUTS.get(_region, {}).get("energy")
+        # if _energy_bl is not None:
+        #     try:
+        #         _df_energy = _energy_bl["df_out"]
+        #         _trns_em_cols = [
+        #             c for c in _df_energy.columns
+        #             if "emission" in c.lower()
+        #             and "subsector_total" not in c.lower()
+        #             and "trns" in c.lower()
+        #         ]
+        #         if _trns_em_cols:
+        #             SECTOR_BL_OUTPUTS[_region]["transport"] = {
+        #                 "df_out":   _df_energy,
+        #                 "prefixes": ["trns"],
+        #                 "em_cols":  _trns_em_cols,
+        #             }
+        #             print(f"[v2] transport/{_region}: {len(_trns_em_cols)} real emission cols from energy model")
+        #         else:
+        #             print(f"[v2] transport/{_region}: no trns emission cols found in energy df_out")
+        #     except Exception as _te:
+        #         print(f"[v2] transport/{_region} extraction failed: {_te}")
+        # In the startup loop where transport is extracted from energy:
+        _energy_bl = SECTOR_BL_OUTPUTS.get(_region, {}).get("energy")
+        if _energy_bl is not None:
+            try:
+                _df_energy = _energy_bl["df_out"]
+                # More flexible matching: look for emission columns with transport-related prefixes
+                _trns_em_cols = [
+                    c for c in _df_energy.columns
+                    if "emission" in c.lower()
+                    and "subsector_total" not in c.lower()
+                    and any(t in c.lower() for t in ["trns", "transport", "aviation", "road_", "rail_", "water_"])
+                ]
+                if _trns_em_cols:
+                    SECTOR_BL_OUTPUTS[_region]["transport"] = {
+                        "df_out":   _df_energy,
+                        "prefixes": ["trns"],
+                        "em_cols":  _trns_em_cols,
+                    }
+                    print(f"[v2] transport/{_region}: {len(_trns_em_cols)} real emission cols from energy model")
+                else:
+                    print(f"[v2] transport/{_region}: no trns emission cols found in energy df_out")
+                    print(f"[v2] Available emission cols sample: {[c for c in _df_energy.columns if 'emission' in c.lower()][:10]}")
+            except Exception as _te:
+                print(f"[v2] transport/{_region} extraction failed: {_te}")
+
 # ── Transformer discovery ─────────────────────────────────────────────────────
 def _get_all_transformer_codes() -> Dict[str, str]:
     out = {}
@@ -817,6 +867,124 @@ def _compute_generic_abatement(region: str, policy_cfg: dict) -> dict:
     }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# EMISSION SUMMARY (used by NationalEmissionIQ)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _calc_trend(arr, window: int = 5) -> float:
+    """Average YoY % change over last `window` steps."""
+    a = list(arr)
+    if len(a) < 2:
+        return 0.0
+    a = a[-window:] if len(a) >= window else a
+    changes = [(a[i] - a[i-1]) / a[i-1] * 100 for i in range(1, len(a)) if abs(a[i-1]) > 1e-9]
+    return round(float(np.mean(changes)), 2) if changes else 0.0
+
+
+def _get_emission_summary(region: str) -> dict:
+    """
+    Pull real SISEPUEDE baseline for every sector and return a compact summary.
+    All series values stay in SISEPUEDE-native units (consistent within a region).
+    Percentage shares and YoY trends are computed so callers don't need to worry
+    about absolute units for comparative analysis.
+    """
+    bl = BASELINES.get(region, BASELINES["costa_rica"])
+    n  = len(bl["df"])
+    years = _make_years(n)
+    gas = "co2"
+
+    sector_series: dict = {}   # sector → np.array of length n
+
+    # ── Transport (exact scope 1/2/3 physics) ──────────────────────────────────
+    try:
+        modes  = bl["modes"];  fuels = bl["fuels"]
+        prx    = bl["proxies"]; eff   = bl["eff_lookup"]
+        frozen = {k: np.full(n, float(v[0])) for k, v in bl["gas_ef_lookups"]["co2"].items()}
+        gef    = GRID_EF_KG_CO2_PER_KWH.get(region, _GRID_EF_FALLBACK)
+        s1 = _scope1_by_mode(bl["df"], prx, frozen, eff, modes, fuels, gas)
+        s2 = _scope2_by_mode(bl["df"], prx, eff, modes, gef, gas)
+        s3 = _scope3_by_mode(bl["df"], prx, eff, modes, fuels, gas)
+        tr_arr = _sum_modes(s1, n) + _sum_modes(s2, n) + _sum_modes(s3, n)  # tonnes
+
+        # Per-mode breakdown (top modes by final-year value)
+        mode_final = {
+            m: float(np.array(s1.get(m, [0]*n)) +
+                     np.array(s2.get(m, [0]*n)) +
+                     np.array(s3.get(m, [0]*n)))[-1]
+            for m in modes
+        }
+        top_modes = sorted(mode_final.items(), key=lambda x: -x[1])[:4]
+
+        sector_series["transport"] = {
+            "arr": tr_arr,
+            "top_sub": [{"name": m, "val": round(v, 2)} for m, v in top_modes if v > 0],
+        }
+    except Exception as _e:
+        print(f"[iq] transport summary {region}: {_e}")
+
+    # ── Other sectors from pre-computed SISEPUEDE outputs ──────────────────────
+    for sec in ["energy", "agriculture", "waste", "industrial"]:
+        bl_info = SECTOR_BL_OUTPUTS.get(region, {}).get(sec)
+        if not bl_info:
+            continue
+        try:
+            df_out = bl_info["df_out"]
+            pfxs   = bl_info["prefixes"]
+            # Prefer CO2-only columns; fall back to all emission cols
+            all_em = [c for c in df_out.columns
+                      if "emission" in c.lower() and "subsector_total" not in c.lower()
+                      and any(p in c.lower() for p in pfxs)]
+            em_co2 = [c for c in all_em if f"_{gas}_" in c.lower()]
+            em_cols = em_co2 if em_co2 else all_em
+            if not em_cols:
+                continue
+            sec_arr = df_out[em_cols].sum(axis=1).values.astype(float)
+
+            top_sub = []
+            for pfx in pfxs:
+                pc = [c for c in em_cols if pfx in c.lower()]
+                if pc:
+                    val = float(df_out[pc].sum(axis=1).values[-1])
+                    top_sub.append({"name": SUBSECTOR_LABELS.get(pfx, pfx), "val": round(val, 2)})
+            top_sub.sort(key=lambda x: -x["val"])
+
+            sector_series[sec] = {"arr": sec_arr, "top_sub": top_sub[:4]}
+        except Exception as _e:
+            print(f"[iq] {sec} summary {region}: {_e}")
+
+    if not sector_series:
+        return {"years": years, "sectors": {}, "grand_total_series": [0.0]*n}
+
+    # ── Grand total + relative shares ──────────────────────────────────────────
+    grand = np.zeros(n)
+    for s in sector_series.values():
+        grand += s["arr"]
+
+    grand_final = float(grand[-1]) if grand[-1] > 0 else 1.0
+
+    out_sectors: dict = {}
+    for sec, info in sector_series.items():
+        arr = info["arr"]
+        final_val = float(arr[-1])
+        pct_share = round(final_val / grand_final * 100, 1)
+        trend = _calc_trend(arr)
+        out_sectors[sec] = {
+            "series":    [round(float(x), 4) for x in arr],
+            "final_val": round(final_val, 4),
+            "pct_share": pct_share,
+            "trend_pct": trend,
+            "top_sub":   info["top_sub"],
+        }
+
+    return {
+        "region":            region,
+        "years":             years,
+        "grand_total_series":[round(float(x), 4) for x in grand],
+        "grand_final_val":   round(grand_final, 4),
+        "sectors":           out_sectors,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -838,6 +1006,14 @@ async def list_sectors():
         }
         for s, m in SECTOR_META.items()
     ]}
+
+
+@app.get("/v2/emission-summary/{region}")
+async def get_emission_summary(region: str):
+    """All-sector emission summary from real SISEPUEDE baselines. Used by NationalEmissionIQ."""
+    if region not in BASELINES:
+        raise HTTPException(404, f"Region '{region}' not found. Valid: {list(BASELINES.keys())}")
+    return _get_emission_summary(region)
 
 
 @app.get("/v2/sectors/{sector}/policies")
@@ -957,23 +1133,65 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
     target_gas = gas.lower()
 
     if sector == "transport":
+        # ── Use real SISEPUEDE energy model output (trns columns) if available ──
+        _trns_bl = SECTOR_BL_OUTPUTS.get(region, {}).get("transport")
+        if _trns_bl:
+            _df_out   = _trns_bl["df_out"]
+            _em_cols  = _trns_bl.get("em_cols") or [
+                c for c in _df_out.columns
+                if "emission" in c.lower() and "trns" in c.lower()
+                and "subsector_total" not in c.lower()
+            ]
+            # Filter to requested gas
+            _gas_cols = [c for c in _em_cols if f"_{target_gas}_" in c.lower()]
+            if not _gas_cols:
+                _gas_cols = _em_cols  # fallback: all emission cols
+
+            _total = _df_out[_gas_cols].sum(axis=1).values.astype(float) if _gas_cols else np.zeros(n)
+
+            # By transport mode subsectors (trns_*)
+            _by_sub: dict = {}
+            _mode_prefixes = set()
+            for c in _gas_cols:
+                parts = c.split("_")
+                # column format: emission_co2_trns_{mode}_... → extract mode token
+                if "trns" in parts:
+                    idx = parts.index("trns")
+                    if idx + 1 < len(parts):
+                        _mode_prefixes.add(parts[idx + 1])
+            for _mp in _mode_prefixes:
+                _mc = [c for c in _gas_cols if f"_trns_{_mp}" in c]
+                if _mc:
+                    _by_sub[_mp] = [round(float(x), 6) for x in _df_out[_mc].sum(axis=1).values]
+
+            # Scope breakdown using SECTOR_SCOPE_MAP if available
+            _scope_map = SECTOR_SCOPE_MAP.get("transport", {})
+            _scopes = {
+                sk: _sum_scope(_gas_cols, _df_out, spfxs)
+                for sk, spfxs in _scope_map.items() if spfxs
+            }
+
+            return {
+                "sector": sector, "region": region, "years": years, "gas": target_gas,
+                "emission_type": "sisepuede_real",
+                "total":  [round(float(x), 6) for x in _total],
+                "by_sub": _by_sub,
+                **_scopes,
+            }
+
+        # ── Fallback: proxy-based calculation (placeholder activity = 100) ──
         modes   = bl["modes"]; fuels = bl["fuels"]
         proxies = bl["proxies"]; eff_lk = bl["eff_lookup"]
-        
-        # Select correct EF lookup
         if target_gas == "co2":
             gas_ef = bl["gas_ef_lookups"]["co2"]
         else:
             gas_ef = bl["gas_ef_lookups"].get(target_gas, {k: np.zeros(n) for k in bl["gas_ef_lookups"]["co2"].keys()})
-            
         grid_ef = GRID_EF_KG_CO2_PER_KWH.get(region, _GRID_EF_FALLBACK)
         frozen  = {k: np.full(n, float(v[0])) for k, v in gas_ef.items()}
-        
         df_in   = bl["df"]
         s1 = _scope1_by_mode(df_in, proxies, frozen, eff_lk, modes, fuels, target_gas)
         s2 = _scope2_by_mode(df_in, proxies, eff_lk, modes, grid_ef, target_gas)
         s3 = _scope3_by_mode(df_in, proxies, eff_lk, modes, fuels, target_gas)
-        
         total = _sum_modes(s1, n) + _sum_modes(s2, n) + _sum_modes(s3, n)
         return {
             "sector": sector, "region": region, "years": years, "gas": target_gas,
