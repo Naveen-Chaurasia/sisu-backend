@@ -414,6 +414,7 @@ async def analyze(req: AnalyzeRequest):
     context = _build_context(summary, topic_sector, question, policies, policy_result)
 
     # 5. Claude Haiku → narrative
+    focus_key = None  # initialised here so it's always defined for the return block
     try:
         analysis = _call_haiku(context, question, topic_label)
     except Exception as _he:
@@ -500,12 +501,11 @@ async def analyze(req: AnalyzeRequest):
         ]
 
     # Determine emission_type for the focused sector
-    # topic_sector is always defined; focus_key only exists in the Haiku fallback path
-    _sector_key = topic_sector or (focus_key if "focus_key" in dir() else None)
+    _sector_key = topic_sector or focus_key
     _focus_et   = summary["sectors"].get(_sector_key, {}).get("emission_type", "unknown") if _sector_key else next(
         (v.get("emission_type", "unknown") for v in summary.get("sectors", {}).values()), "unknown"
     )
-    _is_real  = _focus_et in ("exact", "sisepuede_real")
+    _is_real = _focus_et in ("exact", "sisepuede_real")
 
     return {
         "steps":             ANALYSIS_STEPS,
