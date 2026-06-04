@@ -27,6 +27,10 @@ app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
 
+@app.get("/health")
+async def health():
+    return {"status": "ok", "app": "emission-iq"}
+
 _client = None
 
 def _get_client():
