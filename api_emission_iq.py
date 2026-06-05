@@ -44,23 +44,26 @@ def _get_client():
 
 # ── Topic → SISEPUEDE sector mapping ─────────────────────────────────────────
 TOPIC_TO_SECTOR = {
-    "transport": "transport",
-    "industry":  "industrial",
-    "waste":     "waste",
-    "all":       None,
+    "energy":      "energy",
+    "agriculture": "agriculture",
+    "industry":    "industrial",
+    "waste":       "waste",
+    "all":         None,
 }
 
 COUNTRY_LABELS = {
     "costa_rica": "Costa Rica",
     "mexico":     "Mexico",
-    "uganda":     "Uganda",
+    "ethiopia":   "Ethiopia",
+    "mexico_llm": "Mexico",
 }
 
 # NDC context (from official NDC filings — not emission numbers, just policy targets)
 NDC_CONTEXT = {
     "costa_rica": "NDC target: -55% vs BAU by 2030, net-zero by 2050. 99% renewable electricity grid.",
     "mexico":     "NDC target: -35% unconditional / -70% conditional by 2030. Largest economy in Latin America.",
-    "uganda":     "NDC target: -24.7% vs BAU by 2030. 84% hydropower grid. Fastest-growing transport in East Africa.",
+    "ethiopia":   "NDC target: -68.8% vs BAU by 2030. 90% hydropower grid. Large agricultural sector and fast-growing urban population.",
+    "mexico_llm": "NDC target: -35% unconditional / -70% conditional by 2030. LLM-augmented policy analysis layer.",
 }
 
 ANALYSIS_STEPS = [
@@ -75,8 +78,7 @@ ANALYSIS_STEPS = [
 
 # ── Emission summary — same code path as National Emission Report ─────────────
 
-# The 3 sectors with confirmed real (non-proxy) SISEPUEDE data
-_REAL_SECTORS = ["transport", "waste", "industrial"]
+_REAL_SECTORS = ["transport", "waste", "industrial", "energy", "agriculture"]
 
 
 async def _get_emission_summary_iq(region: str) -> dict:
@@ -614,7 +616,7 @@ _IQ_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "country": {"type": "string", "enum": ["costa_rica", "mexico", "uganda"]},
+                "country": {"type": "string", "enum": ["costa_rica", "mexico", "ethiopia", "mexico_llm"]},
                 "sector":  {"type": "string", "enum": ["transport", "waste", "industrial", "all"]},
             },
             "required": ["country", "sector"],
@@ -645,7 +647,7 @@ _IQ_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "country":   {"type": "string", "enum": ["costa_rica", "mexico", "uganda"]},
+                "country":   {"type": "string", "enum": ["costa_rica", "mexico", "ethiopia", "mexico_llm"]},
                 "sector":    {"type": "string", "enum": ["transport", "waste", "industrial"]},
                 "policy_id": {"type": "string"},
             },
@@ -664,7 +666,7 @@ _IQ_TOOLS = [
             "properties": {
                 "countries": {
                     "type": "array",
-                    "items": {"type": "string", "enum": ["costa_rica", "mexico", "uganda"]},
+                    "items": {"type": "string", "enum": ["costa_rica", "mexico", "ethiopia", "mexico_llm"]},
                     "description": "2 or 3 countries to compare",
                 },
                 "sector": {"type": "string", "enum": ["transport", "waste", "industrial", "all"]},
@@ -683,7 +685,7 @@ _IQ_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "country": {"type": "string", "enum": ["costa_rica", "mexico", "uganda"]},
+                "country": {"type": "string", "enum": ["costa_rica", "mexico", "ethiopia", "mexico_llm"]},
                 "sector":  {"type": "string", "enum": ["transport", "waste", "industrial"]},
             },
             "required": ["country", "sector"],
