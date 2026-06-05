@@ -1,11 +1,20 @@
 """
 apiv2.py — Multi-sector SISEPUEDE API v2 (port 8001)
 Run: uvicorn apiv2:app --port 8001 --reload
+
+LOGGING GUIDE:
+- [v2] = General API startup/info
+- [LOAD] = File loading and baseline creation
+- [MODEL] = Sector model initialization and execution
+- [PROXY] = When fallback to proxy/generic calculation occurs
+- [GAS] = Gas-specific column filtering
+- [DETAIL] = by_detail extraction attempts
+- [FRACTION] = Fuel share validation checks
 """
 import warnings
 warnings.filterwarnings("ignore")
 
-import os, sys
+import os, sys, traceback
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List
@@ -23,6 +32,17 @@ import sisepuede.transformers as trf
 import sisepuede.transformers.transformers as trfs
 from sisepuede.manager.sisepuede_examples import SISEPUEDEExamples
 
+# ── Logging helper ───────────────────────────────────────────────────────────
+def _log(tag: str, msg: str, level: str = "INFO"):
+    """Centralized logging with consistent format."""
+    prefix = f"[{tag}]"
+    if level == "ERROR":
+        print(f"{prefix} ❌ {msg}")
+    elif level == "WARN":
+        print(f"{prefix} ⚠️  {msg}")
+    else:
+        print(f"{prefix} {msg}")
+
 # Try to import individual sector models (none require Julia)
 try:
     from sisepuede.models.afolu import AFOLU
@@ -30,8 +50,9 @@ try:
     import sisepuede.models.energy_consumption as _mec
     from sisepuede.models.ippu import IPPU
     _SECTOR_MODELS_OK = True
+    _log("MODEL", "All sector models imported successfully (Julia runtime available)")
 except ImportError as _ie:
-    print(f"[v2] Sector model imports unavailable ({_ie}). Non-transport → proxy fallback.")
+    _log("MODEL", f"Julia-based sector models unavailable: {_ie}. Energy/IPPU will use proxy fallback.", "WARN")
     _SECTOR_MODELS_OK = False
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -62,13 +83,12 @@ SECTOR_META = {
     "cross_sector": {"label": "Cross-Sector",             "icon": "🔗", "color": "#64748b"},
 }
 
-# Substring patterns in SISEPUEDE output column names → sector
 SECTOR_EMISSION_PREFIXES: Dict[str, List[str]] = {
     "agriculture": ["agrc", "lvst", "lsmm", "soil", "lndu", "pflo"],
     "waste":       ["waso", "wali", "trww"],
     "energy":      ["inen", "scoe", "entc", "fgtv"],
     "industrial":  ["ippu"],
-    "transport":   ["trns"],   # extracted from energy_consumption df_out
+    "transport":   ["trns"],
 }
 
 SUBSECTOR_LABELS = {
@@ -88,9 +108,7 @@ SUBSECTOR_COLORS = {
     "fgtv": "#78716c", "ippu": "#ef4444",
 }
 
-# ── Fine-grained category labels & colours (one level below subsector) ─────────
 DETAIL_LABELS: Dict[str, str] = {
-    # agrc – crop types
     "rice": "Rice", "cereals": "Cereals", "fruits": "Fruits",
     "vegetables_and_vines": "Vegetables & Vines", "sugar_cane": "Sugar Cane",
     "nuts": "Nuts", "pulses": "Pulses", "fibers": "Fibers",
@@ -98,36 +116,29 @@ DETAIL_LABELS: Dict[str, str] = {
     "other_woody_perennial": "Other Woody Perennial",
     "herbs_and_other_perennial_crops": "Herbs & Perennials",
     "bevs_and_spices": "Beverages & Spices",
-    # lvst – livestock
     "buffalo": "Buffalo", "cattle_dairy": "Dairy Cattle",
     "cattle_nondairy": "Beef Cattle", "chickens": "Chickens",
     "goats": "Goats", "horses": "Horses", "mules": "Mules",
     "pigs": "Pigs", "sheep": "Sheep",
-    # lsmm – manure management systems
     "anaerobic_digester": "Anaerobic Digester", "lagoon": "Lagoon",
     "composting": "Composting", "dry_lot": "Dry Lot",
     "deep_bedding": "Deep Bedding", "biodigester": "Biodigester",
     "solid_storage": "Solid Storage", "pasture": "Pasture Range",
     "daily_spread": "Daily Spread",
-    # soil
     "synthetic_fertilizer": "Synthetic Fertilizer",
     "organic_amendments": "Organic Amendments",
     "rice_fields": "Rice Fields", "liming": "Liming", "urea": "Urea",
-    # waso – solid waste streams
     "food": "Food Waste", "paper": "Paper", "plastic": "Plastics",
     "glass": "Glass", "metal": "Metal", "nappies": "Nappies",
     "textiles": "Textiles", "wood": "Wood",
     "rubber_leather": "Rubber & Leather",
     "chemical_industrial": "Chemical/Industrial",
     "sludge": "Sludge", "yard": "Yard Waste",
-    # wali / trww – wastewater
     "domestic_rural": "Rural Domestic", "domestic_urban": "Urban Domestic",
     "industrial": "Industrial Effluent",
-    # lndu – land use categories
     "croplands": "Croplands", "forests": "Forests",
     "grasslands": "Grasslands", "wetlands": "Wetlands",
     "settlements": "Settlements",
-    # ippu – industrial process sub-categories
     "cement": "Cement & Lime", "chemicals": "Chemical Industry",
     "metals": "Metal Production", "electronics": "Electronics",
     "hfcs": "HFC Refrigerants", "pfcs": "PFC Gases",
@@ -135,7 +146,6 @@ DETAIL_LABELS: Dict[str, str] = {
 }
 
 DETAIL_COLORS: Dict[str, str] = {
-    # agrc crops – greens/yellows
     "rice": "#84cc16", "cereals": "#a3e635", "fruits": "#f97316",
     "vegetables_and_vines": "#22c55e", "sugar_cane": "#fbbf24",
     "nuts": "#d97706", "pulses": "#65a30d", "fibers": "#15803d",
@@ -143,63 +153,53 @@ DETAIL_COLORS: Dict[str, str] = {
     "other_woody_perennial": "#166534",
     "herbs_and_other_perennial_crops": "#86efac",
     "bevs_and_spices": "#fde68a",
-    # lvst – earthy tones
     "buffalo": "#78350f", "cattle_dairy": "#f59e0b",
     "cattle_nondairy": "#b45309", "chickens": "#fcd34d",
     "goats": "#d97706", "horses": "#92400e", "mules": "#a16207",
     "pigs": "#fb923c", "sheep": "#fef08a",
-    # lsmm
     "anaerobic_digester": "#06b6d4", "lagoon": "#0891b2",
     "composting": "#65a30d", "dry_lot": "#a3a3a3",
     "deep_bedding": "#78716c", "biodigester": "#22d3ee",
     "solid_storage": "#94a3b8", "pasture": "#4ade80",
     "daily_spread": "#86efac",
-    # soil
     "synthetic_fertilizer": "#f43f5e", "organic_amendments": "#fb923c",
     "rice_fields": "#84cc16", "liming": "#cbd5e1", "urea": "#fca5a5",
-    # waso
     "food": "#8b5cf6", "paper": "#a78bfa", "plastic": "#6d28d9",
     "glass": "#c4b5fd", "metal": "#94a3b8", "nappies": "#f9a8d4",
     "textiles": "#ec4899", "wood": "#92400e",
     "rubber_leather": "#78350f", "chemical_industrial": "#ef4444",
     "sludge": "#64748b", "yard": "#22c55e",
-    # wali / trww
     "domestic_rural": "#818cf8", "domestic_urban": "#6366f1",
     "industrial": "#4338ca",
-    # lndu
     "croplands": "#fbbf24", "forests": "#16a34a",
     "grasslands": "#84cc16", "wetlands": "#0ea5e9",
     "settlements": "#94a3b8",
-    # ippu
     "cement": "#f97316", "chemicals": "#3b82f6",
     "metals": "#94a3b8", "electronics": "#8b5cf6",
     "hfcs": "#ec4899", "pfcs": "#06b6d4",
     "sf6": "#fbbf24",
 }
 
-# GHG Protocol scope classification per non-transport sector.
-# Keys must match SECTOR_EMISSION_PREFIXES entries.
-# scope1 = direct combustion/process; scope2 = electricity/grid; scope3 = upstream/fugitive
 SECTOR_SCOPE_MAP: Dict[str, Dict[str, List[str]]] = {
     "energy": {
-        "scope1": ["inen", "scoe"],  # direct stationary combustion: industrial + buildings
-        "scope2": ["entc"],          # electricity generation & grid supply
-        "scope3": ["fgtv"],          # fugitive/upstream emissions from fuel extraction
+        "scope1": ["inen", "scoe"],
+        "scope2": ["entc"],
+        "scope3": ["fgtv"],
     },
     "industrial": {
-        "scope1": ["ippu"],  # direct industrial process emissions
-        "scope2": [],        # electricity for processes captured in inen (energy sector)
-        "scope3": [],        # upstream raw materials not modelled in SISEPUEDE
+        "scope1": ["ippu"],
+        "scope2": [],
+        "scope3": [],
     },
     "agriculture": {
-        "scope1": ["agrc", "lvst", "lsmm", "soil"],  # direct field/livestock/manure/soil
-        "scope2": [],                                  # no grid electricity in AFOLU model
-        "scope3": ["lndu", "pflo"],                   # land-use change & forestry
+        "scope1": ["agrc", "lvst", "lsmm", "soil"],
+        "scope2": [],
+        "scope3": ["lndu", "pflo"],
     },
     "waste": {
-        "scope1": ["waso", "wali"],  # solid waste disposal & liquid wastewater direct
+        "scope1": ["waso", "wali"],
         "scope2": [],
-        "scope3": ["trww"],          # industrial wastewater (upstream process)
+        "scope3": ["trww"],
     },
 }
 
@@ -214,7 +214,6 @@ ED_TJ_PER_LITRE = {
 }
 _ED_FALLBACK = 3.50e-5
 
-# IPCC AR5 CO2 factors (kg/TJ). Used ONLY for CO2 in Transport.
 CO2_KG_PER_TJ = {
     "diesel": 74100.0, "gasoline": 69300.0, "kerosene": 71500.0,
     "natural_gas": 56100.0, "biofuels": 0.0,
@@ -222,7 +221,7 @@ CO2_KG_PER_TJ = {
     "electricity": 0.0, "ammonia": 0.0,
 }
 
-GRID_EF_KG_CO2_PER_KWH = {"costa_rica": 0.020, "mexico": 0.454, "uganda": 0.091}
+GRID_EF_KG_CO2_PER_KWH = {"costa_rica": 0.020, "mexico": 0.454, "ethiopia": 0.020, "mexico_llm": 0.454}
 _GRID_EF_FALLBACK = 0.400
 
 UPSTREAM_MULTIPLIER = {
@@ -279,7 +278,6 @@ def _build_efficiency_lookup(df, modes, fuels):
     return lookup
 
 def _build_gas_ef_lookup(df, gas, modes, fuels):
-    """Reads CH4/N2O EFs from SISEPUEDE columns."""
     n = len(df)
     return {
         (mode, fuel): (
@@ -291,16 +289,10 @@ def _build_gas_ef_lookup(df, gas, modes, fuels):
     }
 
 def _build_co2_ef_lookup(modes, fuels, n):
-    """Generates CO2 EFs from Physics Constants."""
     return {(mode, fuel): np.full(n, float(CO2_KG_PER_TJ.get(fuel, 0.0)))
             for mode in modes for fuel in fuels}
 
 def _scope1_by_mode(df, proxies, gas_ef_lookup, eff_lookup, modes, fuels, gas_type="co2"):
-    """
-    Calculates Scope 1.
-    If gas_type is 'co2', gas_ef_lookup should be constants.
-    If gas_type is 'ch4'/'n2o', gas_ef_lookup should be from DF columns.
-    """
     n = len(df); result = {}
     for mode in modes:
         proxy = proxies.get(mode, np.ones(n) * 100)
@@ -313,18 +305,15 @@ def _scope1_by_mode(df, proxies, gas_ef_lookup, eff_lookup, modes, fuels, gas_ty
                 continue
             frac = df[frac_col].fillna(0.0).values
             eff  = eff_lookup.get((mode, fuel), np.full(n, 3.0))
-            # Use the provided lookup (either constant or column-based)
             ef_val = gas_ef_lookup.get((mode, fuel), np.zeros(n))
             em  += frac * (proxy / np.maximum(eff, 1e-9)) * ED_TJ_PER_LITRE.get(fuel, _ED_FALLBACK) * ef_val
         result[mode] = (em / 1e3).tolist()
     return result
 
 def _scope2_by_mode(df, proxies, eff_lookup, modes, grid_ef, gas_type="co2"):
-    """Scope 2 is typically only CO2 (Grid Electricity)."""
     n = len(df); result = {}
     if gas_type != "co2":
         return {m: [0.0] * n for m in modes}
-        
     for mode in modes:
         proxy = proxies.get(mode, np.ones(n) * 100)
         frac_col = f"frac_trns_fuelmix_{mode}_electricity"
@@ -336,11 +325,9 @@ def _scope2_by_mode(df, proxies, eff_lookup, modes, grid_ef, gas_type="co2"):
     return result
 
 def _scope3_by_mode(df, proxies, eff_lookup, modes, fuels, gas_type="co2"):
-    """Scope 3 is typically only CO2 (Upstream Fuel Chain)."""
     n = len(df); result = {}
     if gas_type != "co2":
         return {m: [0.0] * n for m in modes}
-
     for mode in modes:
         proxy = proxies.get(mode, np.ones(n) * 100)
         em = np.zeros(n)
@@ -350,7 +337,6 @@ def _scope3_by_mode(df, proxies, eff_lookup, modes, fuels, gas_type="co2"):
                 continue
             frac = df[frac_col].fillna(0.0).values
             eff  = eff_lookup.get((mode, fuel), np.full(n, 3.0))
-            # Upstream is proportional to CO2 content
             co2_ef = CO2_KG_PER_TJ.get(fuel, 0.0)
             em  += frac * (proxy / np.maximum(eff, 1e-9)) * ED_TJ_PER_LITRE.get(fuel, _ED_FALLBACK) * co2_ef * UPSTREAM_MULTIPLIER.get(fuel, 0.15)
         result[mode] = (em / 1e3).tolist()
@@ -363,29 +349,20 @@ def _sum_modes(by_mode, n):
     return arr
 
 def _sum_scope(em_cols: list, df_out, prefixes: list) -> list:
-    """Sum all emission columns whose name contains any of the given subsector prefixes."""
     cols = [c for c in em_cols if any(p in c.lower() for p in prefixes)]
     if not cols:
         return [0.0] * len(df_out)
     return [round(float(x), 6) for x in df_out[cols].sum(axis=1).values]
 
 # ── Activity-based proportion fallback ───────────────────────────────────────
-# Maps subsector prefix → input column prefix that encodes per-category activity
 _ACTIVITY_COL_MAP: Dict[str, str] = {
-    "agrc": "n_agrc_",
-    "lvst": "pop_lvst_",
-    "lsmm": "frac_lsmm_",
-    "soil": "frac_soil_",
-    "waso": "frac_waso_",
-    "wali": "frac_wali_",
-    "trww": "frac_trww_",
-    "lndu": "area_lndu_",
-    "inen": "frac_inen_",
+    "agrc": "n_agrc_", "lvst": "pop_lvst_", "lsmm": "frac_lsmm_",
+    "soil": "frac_soil_", "waso": "frac_waso_", "wali": "frac_wali_",
+    "trww": "frac_trww_", "lndu": "area_lndu_", "inen": "frac_inen_",
 }
 _ACTIVITY_SKIP = frozenset({"scalar", "initial", "total", "minimum", "maximum",
                              "average", "default", "dummy", "none"})
 
-# Explicit category → input column for subsectors where no simple prefix works
 _EXPLICIT_CAT_MAP: Dict[str, Dict[str, str]] = {
     "scoe": {
         "residential":          "consumpinit_scoe_gj_per_hh_residential_heat_energy",
@@ -404,7 +381,6 @@ _EXPLICIT_CAT_MAP: Dict[str, Dict[str, str]] = {
         "pp_geothermal": "nemomod_entc_residual_capacity_pp_geothermal_gw",
         "pp_biogas":     "nemomod_entc_residual_capacity_pp_biogas_gw",
     },
-    # fgtv: use domestic fraction (1 - import_frac) as proxy for local production activity
     "fgtv": {
         "fuel_coal":        "frac_enfu_fuel_demand_imported_pj_fuel_coal",
         "fuel_crude":       "frac_enfu_fuel_demand_imported_pj_fuel_crude",
@@ -412,21 +388,18 @@ _EXPLICIT_CAT_MAP: Dict[str, Dict[str, str]] = {
         "fuel_oil":         "frac_enfu_fuel_demand_imported_pj_fuel_oil",
     },
 }
-# fgtv proxy is import fraction → invert to get domestic production proxy
 _INVERT_PROXY = frozenset({"fgtv"})
 
-
 def _activity_based_detail(df_input, subsector_prefix: str, total_series: list) -> dict:
-    """Approximate per-category breakdown from input activity proportions."""
     n = len(total_series)
     total_arr = np.array(total_series, dtype=float)
 
-    # ── Explicit column map ──────────────────────────────────────────────────
     if subsector_prefix in _EXPLICIT_CAT_MAP:
         cats: dict = {}
         invert = subsector_prefix in _INVERT_PROXY
         for cat, col in _EXPLICIT_CAT_MAP[subsector_prefix].items():
             if col not in df_input.columns:
+                _log("DETAIL", f"Column not found for {subsector_prefix}/{cat}: {col}", "WARN")
                 continue
             vals = df_input[col].fillna(0.0).values.astype(float)
             if invert:
@@ -434,6 +407,7 @@ def _activity_based_detail(df_input, subsector_prefix: str, total_series: list) 
             if np.any(vals > 0):
                 cats[cat] = vals
         if len(cats) < 2:
+            _log("DETAIL", f"Not enough categories for {subsector_prefix} (found {len(cats)})", "WARN")
             return {}
         result: dict = {}
         for yr_i in range(n):
@@ -444,9 +418,9 @@ def _activity_based_detail(df_input, subsector_prefix: str, total_series: list) 
                 result.setdefault(cat, []).append(round(float(total_arr[yr_i]) * frac, 6))
         return result if len(result) >= 2 else {}
 
-    # ── Prefix scan fallback ─────────────────────────────────────────────────
     col_prefix = _ACTIVITY_COL_MAP.get(subsector_prefix)
     if not col_prefix:
+        _log("DETAIL", f"No activity column map for subsector: {subsector_prefix}", "WARN")
         return {}
     cats = {}
     for c in df_input.columns:
@@ -459,6 +433,7 @@ def _activity_based_detail(df_input, subsector_prefix: str, total_series: list) 
         if np.any(vals > 0):
             cats[cat] = vals
     if len(cats) < 2:
+        _log("DETAIL", f"Prefix scan found <2 categories for {subsector_prefix}", "WARN")
         return {}
     result = {}
     for yr_i in range(n):
@@ -469,14 +444,12 @@ def _activity_based_detail(df_input, subsector_prefix: str, total_series: list) 
             result.setdefault(cat, []).append(round(float(total_arr[yr_i]) * frac, 6))
     return result if len(result) >= 2 else {}
 
-
 _GAS_SFXS = frozenset({
     "co2", "ch4", "n2o", "co2e", "sf6", "hfc", "pfc", "hfcs", "pfcs",
     "co2_equivalent", "gwp", "kg", "tonne", "mt", "emission",
 })
 
 def _extract_by_detail(em_cols: list, df_out, subsector_prefix: str) -> dict:
-    """Extract one time-series per fine-grained category within a subsector."""
     pfx = f"{subsector_prefix}_"
     subcat: dict = {}
     for c in em_cols:
@@ -498,13 +471,41 @@ def _extract_by_detail(em_cols: list, df_out, subsector_prefix: str) -> dict:
         tok: [round(float(x), 6) for x in df_out[cols].sum(axis=1).values]
         for tok, cols in subcat.items() if cols
     }
+    if not result:
+        _log("DETAIL", f"No detail categories extracted for {subsector_prefix} from {len(em_cols)} cols", "WARN")
     return result if len(result) >= 2 else {}
 
 # ── Baseline loading ──────────────────────────────────────────────────────────
-MEXICO_CSV = Path(__file__).parent / "mexico_full_input.csv"
-UGANDA_CSV = Path(__file__).parent / "uganda_full_input.csv"
+MEXICO_CSV     = Path(__file__).parent / "mexico_full_input.csv"
+ETHIOPIA_CSV   = Path(__file__).parent / "eithopia_full_input.csv"
+MEXICO_LLM_CSV = Path(__file__).parent / "mexico_llm_full_input.csv"
 
-def _make_baseline(df, transformers):
+def _load_region_data(filepath: Path, region_name: str):
+    """Load data from CSV or Excel with detailed logging."""
+    _log("LOAD", f"Loading {region_name} from {filepath}")
+    
+    if not filepath.exists():
+        _log("LOAD", f"❌ File not found: {filepath}", "ERROR")
+        return None
+    
+    try:
+        if filepath.suffix.lower() == '.xlsx':
+            _log("LOAD", f"Reading Excel file: {filepath}")
+            df = pd.read_excel(filepath)
+        else:
+            _log("LOAD", f"Reading CSV file: {filepath}")
+            df = pd.read_csv(filepath)
+        
+        _log("LOAD", f"✓ Loaded {region_name}: {len(df)} rows, {len(df.columns)} columns")
+        _log("LOAD", f"  Sample columns: {list(df.columns[:5])}")
+        return df
+    except Exception as e:
+        _log("LOAD", f"❌ Failed to load {region_name}: {e}", "ERROR")
+        traceback.print_exc()
+        return None
+
+def _make_baseline(df, transformers, region_name: str):
+    _log("LOAD", f"Creating baseline for {region_name}")
     modes   = _detect_transport_modes(df)
     fuels   = _detect_transport_fuels(df, modes)
     n       = len(df)
@@ -513,6 +514,11 @@ def _make_baseline(df, transformers):
     sis_gases = _detect_available_gases(df)
     gas_ef  = {g: _build_gas_ef_lookup(df, g, modes, fuels) for g in sis_gases}
     gas_ef["co2"] = _build_co2_ef_lookup(modes, fuels, n)
+    
+    _log("LOAD", f"  Transport modes: {modes}")
+    _log("LOAD", f"  Transport fuels: {fuels}")
+    _log("LOAD", f"  Available gases: {sorted({'co2'} | set(sis_gases))}")
+    
     return {
         "df": df, "transformers": transformers, "modes": modes, "fuels": fuels,
         "available_gases": sorted({"co2"} | set(sis_gases)),
@@ -525,31 +531,51 @@ _df_cr    = _examples("input_data_frame")
 _trf_cr   = trfs.Transformers({}, df_input=_df_cr)
 
 print("[v2] Loading Mexico baseline…")
-_df_mx = pd.read_csv(MEXICO_CSV)
-try:
-    _trf_mx = trfs.Transformers({}, df_input=_df_mx)
-except Exception as exc:
-    print(f"  Mexico transformer init skipped: {exc.__class__.__name__}")
+_df_mx = _load_region_data(MEXICO_CSV, "mexico")
+if _df_mx is not None:
+    try:
+        _trf_mx = trfs.Transformers({}, df_input=_df_mx)
+    except Exception as exc:
+        _log("LOAD", f"Mexico transformer init skipped: {exc.__class__.__name__}", "WARN")
+        _trf_mx = _trf_cr
+else:
     _trf_mx = _trf_cr
 
-print("[v2] Loading Uganda baseline…")
-_df_ug = pd.read_csv(UGANDA_CSV)
-try:
-    _trf_ug = trfs.Transformers({}, df_input=_df_ug)
-except Exception as exc:
-    print(f"  Uganda transformer init skipped: {exc.__class__.__name__}")
+print("[v2] Loading Ethiopia baseline…")
+_df_ug  = _load_region_data(ETHIOPIA_CSV, "ethiopia")
+region_key = "ethiopia"
+
+if _df_ug is not None:
+    try:
+        _trf_ug = trfs.Transformers({}, df_input=_df_ug)
+    except Exception as exc:
+        _log("LOAD", f"{region_key} transformer init skipped: {exc.__class__.__name__}", "WARN")
+        _trf_ug = _trf_cr
+else:
     _trf_ug = _trf_cr
 
+print("[v2] Loading Mexico LLM baseline…")
+_df_mx_llm = _load_region_data(MEXICO_LLM_CSV, "mexico_llm")
+if _df_mx_llm is not None:
+    try:
+        _trf_mx_llm = trfs.Transformers({}, df_input=_df_mx_llm)
+    except Exception as exc:
+        _log("LOAD", f"mexico_llm transformer init skipped: {exc.__class__.__name__}", "WARN")
+        _trf_mx_llm = _trf_cr
+else:
+    _trf_mx_llm = _trf_mx  # fallback to Mexico if file missing
+
 BASELINES = {
-    "costa_rica": _make_baseline(_df_cr, _trf_cr),
-    "mexico":     _make_baseline(_df_mx, _trf_mx),
-    "uganda":     _make_baseline(_df_ug, _trf_ug),
+    "costa_rica": _make_baseline(_df_cr,     _trf_cr,     "costa_rica"),
+    "mexico":     _make_baseline(_df_mx,     _trf_mx,     "mexico")     if _df_mx     is not None else None,
+    region_key:   _make_baseline(_df_ug,     _trf_ug,     region_key)   if _df_ug     is not None else None,
+    "mexico_llm": _make_baseline(_df_mx_llm, _trf_mx_llm, "mexico_llm") if _df_mx_llm is not None else None,
 }
 
-# ── Sector model initialization (Option A: true model.project() per sector) ───
+# ── Sector model initialization ───────────────────────────────────────────────
 SECTOR_MODELS: Dict[str, object]        = {}
-SECTOR_BL_OUTPUTS: Dict[str, Dict]     = {}  # region → sector → {df_out, total, by_sub}
-SECTOR_EM_COLS: Dict[str, List[str]]   = {}  # sector → [col_names]
+SECTOR_BL_OUTPUTS: Dict[str, Dict]     = {}
+SECTOR_EM_COLS: Dict[str, List[str]]   = {}
 
 if _SECTOR_MODELS_OK:
     _ma = _examples.model_attributes
@@ -561,15 +587,20 @@ if _SECTOR_MODELS_OK:
     ]:
         try:
             SECTOR_MODELS[_sname] = _cls(*_args)
-            print(f"[v2] Initialized {_sname} model")
+            _log("MODEL", f"✓ Initialized {_sname} model")
         except Exception as _e:
-            print(f"[v2] {_sname} model init failed: {_e}")
+            _log("MODEL", f"❌ {_sname} model init failed: {_e}", "ERROR")
+            traceback.print_exc()
 
     for _region, _bl in BASELINES.items():
+        if _bl is None:
+            _log("MODEL", f"Skipping {_region}: baseline is None", "WARN")
+            continue
+            
         SECTOR_BL_OUTPUTS[_region] = {}
         for _sname, _model in SECTOR_MODELS.items():
             try:
-                print(f"[v2] Computing {_sname} baseline for {_region}…")
+                _log("MODEL", f"Computing {_sname} baseline for {_region}…")
                 _df_out  = _model.project(_bl["df"])
                 _pfxs    = SECTOR_EMISSION_PREFIXES.get(_sname, [])
                 _em_cols = [
@@ -580,47 +611,23 @@ if _SECTOR_MODELS_OK:
                 ]
                 if _sname not in SECTOR_EM_COLS:
                     SECTOR_EM_COLS[_sname] = _em_cols
-                    print(f"[v2]   {_sname}: {len(_em_cols)} emission cols")
+                    _log("MODEL", f"  {_sname}: {len(_em_cols)} emission cols")
                 
-                # Note: We cache the DF and cols, but we calculate totals dynamically in the endpoint
-                # based on the requested gas.
                 SECTOR_BL_OUTPUTS[_region][_sname] = {
                     "df_out": _df_out,
                     "prefixes": _pfxs
                 }
+                _log("MODEL", f"✓ {_sname}/{_region} baseline computed successfully")
             except Exception as _e:
-                print(f"[v2] {_sname}/{_region} baseline failed: {_e}")
+                _log("MODEL", f"❌ {_sname}/{_region} baseline failed: {_e}", "ERROR")
+                _log("MODEL", f"  → Will use proxy fallback for this sector/region", "WARN")
+                traceback.print_exc()
 
-        # ── Extract transport (trns) from energy df_out ──────────────────────
-        # EnergyConsumption model includes Transportation (TRNS) subsector.
-        # Store it as a separate "transport" entry with real emission values.
-        # _energy_bl = SECTOR_BL_OUTPUTS.get(_region, {}).get("energy")
-        # if _energy_bl is not None:
-        #     try:
-        #         _df_energy = _energy_bl["df_out"]
-        #         _trns_em_cols = [
-        #             c for c in _df_energy.columns
-        #             if "emission" in c.lower()
-        #             and "subsector_total" not in c.lower()
-        #             and "trns" in c.lower()
-        #         ]
-        #         if _trns_em_cols:
-        #             SECTOR_BL_OUTPUTS[_region]["transport"] = {
-        #                 "df_out":   _df_energy,
-        #                 "prefixes": ["trns"],
-        #                 "em_cols":  _trns_em_cols,
-        #             }
-        #             print(f"[v2] transport/{_region}: {len(_trns_em_cols)} real emission cols from energy model")
-        #         else:
-        #             print(f"[v2] transport/{_region}: no trns emission cols found in energy df_out")
-        #     except Exception as _te:
-        #         print(f"[v2] transport/{_region} extraction failed: {_te}")
-        # In the startup loop where transport is extracted from energy:
+        # Extract transport from energy df_out
         _energy_bl = SECTOR_BL_OUTPUTS.get(_region, {}).get("energy")
         if _energy_bl is not None:
             try:
                 _df_energy = _energy_bl["df_out"]
-                # More flexible matching: look for emission columns with transport-related prefixes
                 _trns_em_cols = [
                     c for c in _df_energy.columns
                     if "emission" in c.lower()
@@ -633,12 +640,13 @@ if _SECTOR_MODELS_OK:
                         "prefixes": ["trns"],
                         "em_cols":  _trns_em_cols,
                     }
-                    print(f"[v2] transport/{_region}: {len(_trns_em_cols)} real emission cols from energy model")
+                    _log("MODEL", f"✓ transport/{_region}: {len(_trns_em_cols)} real emission cols from energy model")
                 else:
-                    print(f"[v2] transport/{_region}: no trns emission cols found in energy df_out")
-                    print(f"[v2] Available emission cols sample: {[c for c in _df_energy.columns if 'emission' in c.lower()][:10]}")
+                    _log("MODEL", f"⚠️  transport/{_region}: no trns emission cols found in energy df_out", "WARN")
+                    _log("MODEL", f"  Available emission cols sample: {[c for c in _df_energy.columns if 'emission' in c.lower()][:10]}")
             except Exception as _te:
-                print(f"[v2] transport/{_region} extraction failed: {_te}")
+                _log("MODEL", f"❌ transport/{_region} extraction failed: {_te}", "ERROR")
+                traceback.print_exc()
 
 # ── Transformer discovery ─────────────────────────────────────────────────────
 def _get_all_transformer_codes() -> Dict[str, str]:
@@ -655,6 +663,7 @@ ALL_TRANSFORMER_CODES: Dict[str, str] = _get_all_transformer_codes()
 def _load_sector_policies(sector: str) -> List[dict]:
     fp = POLICIES_DIR / f"{sector}.yaml"
     if not fp.exists():
+        _log("POLICY", f"No policy file for sector '{sector}'", "WARN")
         return []
     with open(fp, "r", encoding="utf-8") as f:
         return yaml.safe_load(f).get("policies", [])
@@ -668,7 +677,6 @@ def _load_all_policies() -> Dict[str, List[dict]]:
 
 ALL_POLICIES: Dict[str, List[dict]] = _load_all_policies()
 
-# ── Policy config builder ─────────────────────────────────────────────────────
 def _build_policy_config(policy: dict) -> dict:
     params = dict(policy.get("parameters", {}))
     vir = params.get("vec_implementation_ramp")
@@ -689,15 +697,15 @@ def _build_policy_config(policy: dict) -> dict:
 def _make_years(n: int) -> List[int]:
     return [2015 + round(i * 35 / max(n - 1, 1)) for i in range(n)]
 
-# ── Transport abatement (exact physics, optional detailed scope breakdown) ────
+# ── Transport abatement ───────────────────────────────────────────────────────
 def _compute_transport_abatement(region: str, gas: str, policy_cfg: dict,
                                   detailed: bool = False) -> dict:
+    _log("PROXY", f"Computing transport abatement: region={region}, gas={gas}")
     bl         = BASELINES.get(region, BASELINES["costa_rica"])
     df_input   = bl["df"]
     modes      = bl["modes"]; fuels = bl["fuels"]
     proxies    = bl["proxies"]; eff_lk = bl["eff_lookup"]
     
-    # Get correct EF lookup based on gas
     if gas == "co2":
         gas_ef = bl["gas_ef_lookups"]["co2"]
     else:
@@ -706,7 +714,6 @@ def _compute_transport_abatement(region: str, gas: str, policy_cfg: dict,
     grid_ef    = GRID_EF_KG_CO2_PER_KWH.get(region, _GRID_EF_FALLBACK)
     n          = len(df_input)
 
-    # For baseline, we freeze EFs to t=0 to keep baseline flat
     frozen_gas_ef  = {k: np.full(n, float(v[0])) for k, v in gas_ef.items()}
     
     df_result      = trf.Transformation(policy_cfg, bl["transformers"])()
@@ -751,16 +758,26 @@ def _compute_transport_abatement(region: str, gas: str, policy_cfg: dict,
             "scope2": {m: {"baseline": bl_s2[m], "policy": po_s2[m]} for m in modes},
             "scope3": {m: {"baseline": bl_s3[m], "policy": po_s3[m]} for m in modes},
         }
+    _log("PROXY", f"✓ Transport abatement complete: emission_type=exact, final_reduction={pct}%")
     return out
 
-# ── True sector abatement (SISEPUEDE sector model.project()) ──────────────────
+# ── True sector abatement ─────────────────────────────────────────────────────
 def _compute_true_sector_abatement(region: str, sector: str, gas: str, policy_cfg: dict,
                                     detailed: bool = False) -> dict:
+    _log("MODEL", f"Computing true sector abatement: {sector}/{region}, gas={gas}")
+    
     bl_info  = SECTOR_BL_OUTPUTS.get(region, {}).get(sector)
     em_cols_all  = SECTOR_EM_COLS.get(sector, [])
     model    = SECTOR_MODELS.get(sector)
 
-    if not model or not bl_info or not em_cols_all:
+    if not model:
+        _log("PROXY", f"❌ No model loaded for sector '{sector}' → using proxy", "WARN")
+        return _compute_generic_abatement(region, policy_cfg)
+    if not bl_info:
+        _log("PROXY", f"❌ No baseline output for {sector}/{region} → using proxy", "WARN")
+        return _compute_generic_abatement(region, policy_cfg)
+    if not em_cols_all:
+        _log("PROXY", f"❌ No emission columns registered for sector '{sector}' → using proxy", "WARN")
         return _compute_generic_abatement(region, policy_cfg)
 
     bl   = BASELINES.get(region, BASELINES["costa_rica"])
@@ -769,21 +786,32 @@ def _compute_true_sector_abatement(region: str, sector: str, gas: str, policy_cf
 
     df_policy = trf.Transformation(policy_cfg, bl["transformers"])()
     try:
+        _log("MODEL", f"  Running model.project() for {sector}…")
         df_out_policy = model.project(df_policy)
+        _log("MODEL", f"  ✓ model.project() succeeded")
     except Exception as e:
-        print(f"[v2] {sector} model.project failed ({e}), using proxy fallback")
+        _log("MODEL", f"❌ {sector} model.project failed: {e}", "ERROR")
+        _log("PROXY", f"  → Falling back to generic proxy calculation", "WARN")
+        traceback.print_exc()
         return _compute_generic_abatement(region, policy_cfg)
 
     df_out_bl = bl_info["df_out"]
     
-    # Filter columns by GAS
+    # Filter columns by GAS with logging
     target_gas = gas.lower()
+    _log("GAS", f"Filtering emission columns for gas='{target_gas}'")
     em_cols_bl = [c for c in em_cols_all if f"_{target_gas}_" in c.lower()]
     em_cols_po = [c for c in df_out_policy.columns if "emission" in c.lower() and f"_{target_gas}_" in c.lower()]
+    
+    _log("GAS", f"  Baseline: found {len(em_cols_bl)}/{len(em_cols_all)} columns for '{target_gas}'")
+    _log("GAS", f"  Policy: found {len(em_cols_po)} columns for '{target_gas}'")
 
-    # Fallback if no specific gas columns found
-    if not em_cols_bl: em_cols_bl = [c for c in em_cols_all if "emission" in c.lower()]
-    if not em_cols_po: em_cols_po = [c for c in df_out_policy.columns if "emission" in c.lower()]
+    if not em_cols_bl:
+        _log("GAS", f"  ⚠️  No '{target_gas}' columns in baseline → using all emission cols", "WARN")
+        em_cols_bl = [c for c in em_cols_all if "emission" in c.lower()]
+    if not em_cols_po:
+        _log("GAS", f"  ⚠️  No '{target_gas}' columns in policy → using all emission cols", "WARN")
+        em_cols_po = [c for c in df_out_policy.columns if "emission" in c.lower()]
 
     bl_arr    = df_out_bl[em_cols_bl].sum(axis=1).values.astype(float)
     po_arr    = df_out_policy[em_cols_po].sum(axis=1).values.astype(float) if em_cols_po else np.zeros(n)
@@ -827,10 +855,13 @@ def _compute_true_sector_abatement(region: str, sector: str, gas: str, policy_cf
             })
         out["categories"] = sorted(categories,
             key=lambda c: abs(np.array(c["baseline"]).sum()), reverse=True)
+    
+    _log("MODEL", f"✓ True sector abatement complete: emission_type=exact, final_reduction={pct}%")
     return out
 
 # ── Generic proxy fallback ────────────────────────────────────────────────────
 def _compute_generic_abatement(region: str, policy_cfg: dict) -> dict:
+    _log("PROXY", f"Using GENERIC PROXY fallback for region={region}")
     bl          = BASELINES.get(region, BASELINES["costa_rica"])
     df_input    = bl["df"]
     n           = len(df_input)
@@ -854,7 +885,7 @@ def _compute_generic_abatement(region: str, policy_cfg: dict) -> dict:
     else:
         impact = 0.0
     ramp = np.linspace(0, impact, n)
-    return {
+    result = {
         "years":                  years,
         "baseline":               [100.0] * n,
         "policy":                 [round(float(100 - x), 4) for x in ramp],
@@ -865,13 +896,14 @@ def _compute_generic_abatement(region: str, policy_cfg: dict) -> dict:
         "emission_type":          "proxy",
         "changed_params":         changed[:20],
     }
+    _log("PROXY", f"✓ Proxy abatement complete: emission_type=proxy, impact={impact}%")
+    return result
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# EMISSION SUMMARY (used by NationalEmissionIQ)
+# EMISSION SUMMARY
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _calc_trend(arr, window: int = 5) -> float:
-    """Average YoY % change over last `window` steps."""
     a = list(arr)
     if len(a) < 2:
         return 0.0
@@ -879,22 +911,16 @@ def _calc_trend(arr, window: int = 5) -> float:
     changes = [(a[i] - a[i-1]) / a[i-1] * 100 for i in range(1, len(a)) if abs(a[i-1]) > 1e-9]
     return round(float(np.mean(changes)), 2) if changes else 0.0
 
-
 def _get_emission_summary(region: str) -> dict:
-    """
-    Pull real SISEPUEDE baseline for every sector and return a compact summary.
-    All series values stay in SISEPUEDE-native units (consistent within a region).
-    Percentage shares and YoY trends are computed so callers don't need to worry
-    about absolute units for comparative analysis.
-    """
+    _log("IQ", f"Computing emission summary for {region}")
     bl = BASELINES.get(region, BASELINES["costa_rica"])
     n  = len(bl["df"])
     years = _make_years(n)
     gas = "co2"
 
-    sector_series: dict = {}   # sector → np.array of length n
+    sector_series: dict = {}
 
-    # ── Transport (exact scope 1/2/3 physics) ──────────────────────────────────
+    # Transport
     try:
         modes  = bl["modes"];  fuels = bl["fuels"]
         prx    = bl["proxies"]; eff   = bl["eff_lookup"]
@@ -903,9 +929,8 @@ def _get_emission_summary(region: str) -> dict:
         s1 = _scope1_by_mode(bl["df"], prx, frozen, eff, modes, fuels, gas)
         s2 = _scope2_by_mode(bl["df"], prx, eff, modes, gef, gas)
         s3 = _scope3_by_mode(bl["df"], prx, eff, modes, fuels, gas)
-        tr_arr = _sum_modes(s1, n) + _sum_modes(s2, n) + _sum_modes(s3, n)  # tonnes
+        tr_arr = _sum_modes(s1, n) + _sum_modes(s2, n) + _sum_modes(s3, n)
 
-        # Per-mode breakdown (top modes by final-year value)
         mode_final = {
             m: float(np.array(s1.get(m, [0]*n)) +
                      np.array(s2.get(m, [0]*n)) +
@@ -918,24 +943,26 @@ def _get_emission_summary(region: str) -> dict:
             "arr": tr_arr,
             "top_sub": [{"name": m, "val": round(v, 2)} for m, v in top_modes if v > 0],
         }
+        _log("IQ", f"✓ Transport summary: {len(tr_arr)} years")
     except Exception as _e:
-        print(f"[iq] transport summary {region}: {_e}")
+        _log("IQ", f"❌ transport summary {region}: {_e}", "ERROR")
 
-    # ── Other sectors from pre-computed SISEPUEDE outputs ──────────────────────
+    # Other sectors
     for sec in ["energy", "agriculture", "waste", "industrial"]:
         bl_info = SECTOR_BL_OUTPUTS.get(region, {}).get(sec)
         if not bl_info:
+            _log("IQ", f"⚠️  No baseline for {sec}/{region} → skipping", "WARN")
             continue
         try:
             df_out = bl_info["df_out"]
             pfxs   = bl_info["prefixes"]
-            # Prefer CO2-only columns; fall back to all emission cols
             all_em = [c for c in df_out.columns
                       if "emission" in c.lower() and "subsector_total" not in c.lower()
                       and any(p in c.lower() for p in pfxs)]
             em_co2 = [c for c in all_em if f"_{gas}_" in c.lower()]
             em_cols = em_co2 if em_co2 else all_em
             if not em_cols:
+                _log("IQ", f"⚠️  No emission columns for {sec}/{region} → skipping", "WARN")
                 continue
             sec_arr = df_out[em_cols].sum(axis=1).values.astype(float)
 
@@ -948,13 +975,14 @@ def _get_emission_summary(region: str) -> dict:
             top_sub.sort(key=lambda x: -x["val"])
 
             sector_series[sec] = {"arr": sec_arr, "top_sub": top_sub[:4]}
+            _log("IQ", f"✓ {sec} summary: {len(sec_arr)} years")
         except Exception as _e:
-            print(f"[iq] {sec} summary {region}: {_e}")
+            _log("IQ", f"❌ {sec} summary {region}: {_e}", "ERROR")
 
     if not sector_series:
+        _log("IQ", f"⚠️  No sector data available for {region}", "WARN")
         return {"years": years, "sectors": {}, "grand_total_series": [0.0]*n}
 
-    # ── Grand total + relative shares ──────────────────────────────────────────
     grand = np.zeros(n)
     for s in sector_series.values():
         grand += s["arr"]
@@ -975,6 +1003,7 @@ def _get_emission_summary(region: str) -> dict:
             "top_sub":   info["top_sub"],
         }
 
+    _log("IQ", f"✓ Emission summary complete for {region}: grand_total={grand_final:.2f}")
     return {
         "region":            region,
         "years":             years,
@@ -982,7 +1011,6 @@ def _get_emission_summary(region: str) -> dict:
         "grand_final_val":   round(grand_final, 4),
         "sectors":           out_sectors,
     }
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ENDPOINTS
@@ -1007,19 +1035,18 @@ async def list_sectors():
         for s, m in SECTOR_META.items()
     ]}
 
-
 @app.get("/v2/emission-summary/{region}")
 async def get_emission_summary(region: str):
-    """All-sector emission summary from real SISEPUEDE baselines. Used by NationalEmissionIQ."""
     if region not in BASELINES:
+        _log("API", f"❌ Region '{region}' not found. Valid: {list(BASELINES.keys())}", "ERROR")
         raise HTTPException(404, f"Region '{region}' not found. Valid: {list(BASELINES.keys())}")
     return _get_emission_summary(region)
-
 
 @app.get("/v2/sectors/{sector}/policies")
 async def list_sector_policies(sector: str):
     policies = _load_sector_policies(sector)
     if not policies:
+        _log("API", f"No policies for sector '{sector}'", "WARN")
         raise HTTPException(404, f"No policies for sector '{sector}'")
     meta = SECTOR_META.get(sector, {"label": sector, "color": "#64748b"})
     def _fmt(p):
@@ -1034,24 +1061,27 @@ async def list_sector_policies(sector: str):
         "policies": [_fmt(p) for p in policies],
     }
 
-
 class BatchRequest(BaseModel):
     region: str = "costa_rica"
     gas:    str = "co2"
 
-
 @app.post("/v2/sectors/{sector}/run-batch")
 async def run_sector_batch(sector: str, request: BatchRequest):
+    _log("API", f"Batch request: sector={sector}, region={request.region}, gas={request.gas}")
+    
     policies = _load_sector_policies(sector)
     if not policies:
         raise HTTPException(404, f"No policies for sector '{sector}'")
     bl = BASELINES.get(request.region, BASELINES["costa_rica"])
     if request.gas not in bl["available_gases"]:
+        _log("API", f"Gas '{request.gas}' not available → using co2", "WARN")
         request.gas = "co2"
     is_transport  = (sector == "transport")
     has_true_model = (sector in SECTOR_MODELS and
                       request.region in SECTOR_BL_OUTPUTS and
                       sector in SECTOR_BL_OUTPUTS.get(request.region, {}))
+    
+    _log("API", f"  is_transport={is_transport}, has_true_model={has_true_model}")
 
     def run_one(policy: dict):
         pid = policy["id"]
@@ -1062,6 +1092,7 @@ async def run_sector_batch(sector: str, request: BatchRequest):
             elif has_true_model:
                 out = _compute_true_sector_abatement(request.region, sector, request.gas, cfg)
             else:
+                _log("PROXY", f"Using generic proxy for {sector}/{request.region} (no true model)")
                 out = _compute_generic_abatement(request.region, cfg)
             out.update({
                 "name":           policy["name"],
@@ -1072,6 +1103,7 @@ async def run_sector_batch(sector: str, request: BatchRequest):
             })
             return pid, out
         except Exception as exc:
+            _log("API", f"❌ Error running policy {pid}: {exc}", "ERROR")
             return pid, {"error": str(exc)}
 
     results: dict = {}; errors: dict = {}
@@ -1081,28 +1113,30 @@ async def run_sector_batch(sector: str, request: BatchRequest):
             (errors if "error" in out else results)[pid] = out
 
     emit = "exact" if (is_transport or has_true_model) else "proxy"
+    _log("API", f"✓ Batch complete: {len(results)} success, {len(errors)} errors, emission_type={emit}")
     return {
         "sector": sector, "region": request.region, "gas": request.gas,
         "years": _make_years(len(bl["df"])),
         "emission_type": emit, "results": results, "errors": errors,
     }
 
-
 class PolicyRequest(BaseModel):
     policy_id: str
     region:    str = "costa_rica"
     gas:       str = "co2"
 
-
 @app.post("/v2/sectors/{sector}/run-policy")
 async def run_sector_policy(sector: str, request: PolicyRequest):
-    """Run a SINGLE named policy; returns full simulation result for the simulation tab."""
+    _log("API", f"Policy request: sector={sector}, policy_id={request.policy_id}, region={request.region}, gas={request.gas}")
+    
     policies = _load_sector_policies(sector)
     policy   = next((p for p in policies if p["id"] == request.policy_id), None)
     if not policy:
+        _log("API", f"❌ Policy '{request.policy_id}' not found in sector '{sector}'", "ERROR")
         raise HTTPException(404, f"Policy '{request.policy_id}' not found in sector '{sector}'")
     bl = BASELINES.get(request.region, BASELINES["costa_rica"])
     if request.gas not in bl["available_gases"]:
+        _log("API", f"Gas '{request.gas}' not available → using co2", "WARN")
         request.gas = "co2"
     cfg = _build_policy_config(policy)
 
@@ -1113,6 +1147,7 @@ async def run_sector_policy(sector: str, request: PolicyRequest):
           sector in SECTOR_BL_OUTPUTS.get(request.region, {})):
         result = _compute_true_sector_abatement(request.region, sector, request.gas, cfg, detailed=True)
     else:
+        _log("PROXY", f"Using generic proxy for {sector}/{request.region} (no true model)")
         result = _compute_generic_abatement(request.region, cfg)
 
     result["policy_id"]              = request.policy_id
@@ -1121,40 +1156,40 @@ async def run_sector_policy(sector: str, request: PolicyRequest):
     result["baseline_total"]         = result.get("baseline", [])
     result["policy_total"]           = result.get("policy", [])
     result["final_reduction_tonnes"] = result.get("final_abatement_tonnes", 0)
+    
+    _log("API", f"✓ Policy result: emission_type={result.get('emission_type')}, reduction={result.get('final_reduction_pct')}%")
     return result
-
 
 @app.get("/v2/sectors/{sector}/baseline")
 async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str = "co2"):
-    """Return sector baseline emission time series."""
+    _log("API", f"Baseline request: sector={sector}, region={region}, gas={gas}")
+    
     bl    = BASELINES.get(region, BASELINES["costa_rica"])
     n     = len(bl["df"])
     years = _make_years(n)
     target_gas = gas.lower()
 
     if sector == "transport":
-        # ── Use real SISEPUEDE energy model output (trns columns) if available ──
         _trns_bl = SECTOR_BL_OUTPUTS.get(region, {}).get("transport")
         if _trns_bl:
+            _log("MODEL", f"Using real SISEPUEDE transport output for {region}")
             _df_out   = _trns_bl["df_out"]
             _em_cols  = _trns_bl.get("em_cols") or [
                 c for c in _df_out.columns
                 if "emission" in c.lower() and "trns" in c.lower()
                 and "subsector_total" not in c.lower()
             ]
-            # Filter to requested gas
             _gas_cols = [c for c in _em_cols if f"_{target_gas}_" in c.lower()]
             if not _gas_cols:
-                _gas_cols = _em_cols  # fallback: all emission cols
+                _log("GAS", f"No '{target_gas}' cols for transport → using all", "WARN")
+                _gas_cols = _em_cols
 
             _total = _df_out[_gas_cols].sum(axis=1).values.astype(float) if _gas_cols else np.zeros(n)
 
-            # By transport mode subsectors (trns_*)
             _by_sub: dict = {}
             _mode_prefixes = set()
             for c in _gas_cols:
                 parts = c.split("_")
-                # column format: emission_co2_trns_{mode}_... → extract mode token
                 if "trns" in parts:
                     idx = parts.index("trns")
                     if idx + 1 < len(parts):
@@ -1164,13 +1199,13 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
                 if _mc:
                     _by_sub[_mp] = [round(float(x), 6) for x in _df_out[_mc].sum(axis=1).values]
 
-            # Scope breakdown using SECTOR_SCOPE_MAP if available
             _scope_map = SECTOR_SCOPE_MAP.get("transport", {})
             _scopes = {
                 sk: _sum_scope(_gas_cols, _df_out, spfxs)
                 for sk, spfxs in _scope_map.items() if spfxs
             }
 
+            _log("API", f"✓ Transport baseline: emission_type=sisepuede_real")
             return {
                 "sector": sector, "region": region, "years": years, "gas": target_gas,
                 "emission_type": "sisepuede_real",
@@ -1179,7 +1214,7 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
                 **_scopes,
             }
 
-        # ── Fallback: proxy-based calculation (placeholder activity = 100) ──
+        _log("PROXY", f"Transport: using proxy calculation (no real output)")
         modes   = bl["modes"]; fuels = bl["fuels"]
         proxies = bl["proxies"]; eff_lk = bl["eff_lookup"]
         if target_gas == "co2":
@@ -1205,10 +1240,11 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
 
     bl_info = SECTOR_BL_OUTPUTS.get(region, {}).get(sector)
 
-    # Try on-demand computation if model exists but baseline wasn't pre-cached
+    # On-demand computation
     if not bl_info:
         _model = SECTOR_MODELS.get(sector)
         if _model:
+            _log("MODEL", f"Attempting on-demand baseline for {sector}/{region}")
             try:
                 bl_data = BASELINES.get(region, BASELINES["costa_rica"])
                 _df_out  = _model.project(bl_data["df"])
@@ -1221,9 +1257,10 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
                 ]
                 SECTOR_EM_COLS[sector] = _em_cols
                 
-                # Calculate totals dynamically based on gas
                 _gas_em_cols = [c for c in _em_cols if f"_{target_gas}_" in c.lower()]
-                if not _gas_em_cols: _gas_em_cols = _em_cols # Fallback
+                if not _gas_em_cols:
+                    _log("GAS", f"No '{target_gas}' cols → using all", "WARN")
+                    _gas_em_cols = _em_cols
 
                 _total_arr = (_df_out[_gas_em_cols].sum(axis=1).values.astype(float) if _gas_em_cols else np.zeros(n))
                 _by_sub: dict = {}
@@ -1245,6 +1282,7 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
                     if _pc:
                         _det = _extract_by_detail(_pc, _df_out, _p)
                         if not _det and _sub_series:
+                            _log("DETAIL", f"extract_by_detail failed for {_p} → trying activity_based")
                             _det = _activity_based_detail(bl_data["df"], _p, _sub_series)
                     elif _sub_series:
                         _det = _activity_based_detail(bl_data["df"], _p, _sub_series)
@@ -1254,32 +1292,32 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
                         _by_detail_od[_p] = _det
                         
                 bl_info = {"df_out": _df_out,
+                           "prefixes": _pfxs,
                            "total":  [round(float(x), 6) for x in _total_arr.tolist()],
                            "by_sub": _by_sub,
                            **({"by_detail": _by_detail_od} if _by_detail_od else {}),
                            **_scopes}
                 SECTOR_BL_OUTPUTS.setdefault(region, {})[sector] = bl_info
+                _log("MODEL", f"✓ On-demand baseline computed for {sector}/{region}")
             except Exception as _ode:
-                print(f"[v2] on-demand baseline for {sector}/{region} failed: {_ode}")
+                _log("MODEL", f"❌ on-demand baseline for {sector}/{region} failed: {_ode}", "ERROR")
+                traceback.print_exc()
 
     if bl_info:
         _df_out = bl_info["df_out"]
         _pfxs   = bl_info["prefixes"]
 
-        # All individual emission columns (exclude subsector totals to avoid double-counting)
         _all_em = [c for c in _df_out.columns
                    if "emission" in c.lower()
                    and "subsector_total" not in c.lower()
                    and any(p in c.lower() for p in _pfxs)]
 
-        # Filter to the requested gas; "all" keeps every gas column
         _em_cols = [c for c in _all_em if f"_{target_gas}_" in c.lower()] if target_gas != "all" else _all_em
         
-        # If filtering resulted in empty list (e.g. asking for N2O but only CO2 exists), fallback to all
         if not _em_cols and target_gas != "all":
+             _log("GAS", f"No '{target_gas}' cols → using all emission cols", "WARN")
              _em_cols = _all_em
 
-        # Recompute totals from gas-filtered columns
         _total_arr = (_df_out[_em_cols].sum(axis=1).values.astype(float)
                       if _em_cols else np.zeros(n))
 
@@ -1297,24 +1335,23 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
             for sk, spfxs in _smap.items()
         }
 
-        # by_detail: prefer gas-specific columns (real SISEPUEDE per-gas breakdown),
-        # fall back to all-gas proportions only when a subsector has no gas-specific cols.
         _bl_df: "pd.DataFrame" = BASELINES.get(region, BASELINES["costa_rica"])["df"]
         _by_detail: dict = {}
         for _p in _pfxs:
             _sub_total = _by_sub.get(_p, [])
             if not _sub_total:
                 continue
-            _pc_gas = [c for c in _em_cols if _p in c.lower()]   # gas-specific for this sub
-            _pc_all = [c for c in _all_em if _p in c.lower()]     # all-gas fallback
+            _pc_gas = [c for c in _em_cols if _p in c.lower()]
+            _pc_all = [c for c in _all_em if _p in c.lower()]
             if _pc_gas:
                 _det = _extract_by_detail(_pc_gas, _df_out, _p)
                 if not _det:
+                    _log("DETAIL", f"extract_by_detail failed for {_p}/{target_gas} → trying activity_based")
                     _det = _activity_based_detail(_bl_df, _p, _sub_total)
             elif _pc_all:
-                # subsector emits in other gases but not this one — use all-gas proportions
                 _det = _extract_by_detail(_pc_all, _df_out, _p)
                 if not _det:
+                    _log("DETAIL", f"extract_by_detail (all-gas) failed for {_p} → trying activity_based")
                     _det = _activity_based_detail(_bl_df, _p, _sub_total)
             else:
                 _det = _activity_based_detail(_bl_df, _p, _sub_total)
@@ -1331,16 +1368,17 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
         }
         if _by_detail:
             resp["by_detail"] = _by_detail
+        _log("API", f"✓ Sector baseline: emission_type=exact")
         return resp
 
-    # Proxy fallback when no sector model is available
+    # Proxy fallback
+    _log("PROXY", f"Using PROXY fallback for {sector}/{region} (no model output)")
     _proxy_scale = {
         "agriculture": 5_000_000.0,
         "waste":       1_000_000.0,
         "energy":     10_000_000.0,
         "industrial":  1_500_000.0,
     }.get(sector, 1_000_000.0)
-    # Approximate gas fraction of total CO2e by sector (IPCC AR6 typical shares)
     _GAS_PROXY_FRAC: Dict[str, Dict[str, float]] = {
         "transport":   {"co2": 0.97, "ch4": 0.01, "n2o": 0.02},
         "energy":      {"co2": 0.72, "ch4": 0.18, "n2o": 0.10},
@@ -1356,7 +1394,6 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
         p: [round(float(x / _split), 6) for x in _total_proxy]
         for p in _pfxs
     }
-    # Build proxy scopes and by_mode — split total proportionally by subsector count per scope
     _scope_map   = SECTOR_SCOPE_MAP.get(sector, {})
     _proxy_scopes: dict = {}
     _proxy_by_mode: dict = {}
@@ -1374,7 +1411,6 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
                 }
             else:
                 _proxy_by_mode[sk] = {}
-    # Build by_detail from input proportions even in proxy mode
     _bl_df = BASELINES.get(region, BASELINES["costa_rica"])["df"]
     _proxy_by_detail: dict = {}
     for _p in _pfxs:
@@ -1397,10 +1433,9 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
         **_proxy_scopes,
     }
 
-
 @app.get("/v2/debug/columns/{sector}")
 async def debug_columns(sector: str, region: str = "costa_rica"):
-    """Debug: return actual emission column names and by_detail keys for a sector."""
+    _log("DEBUG", f"Debug columns request: sector={sector}, region={region}")
     em_cols = SECTOR_EM_COLS.get(sector, [])
     bl_info = SECTOR_BL_OUTPUTS.get(region, {}).get(sector, {})
     bl_df   = BASELINES.get(region, BASELINES["costa_rica"])["df"]
@@ -1423,10 +1458,8 @@ async def debug_columns(sector: str, region: str = "costa_rica"):
         "models_loaded":   list(SECTOR_MODELS.keys()),
     }
 
-
 @app.get("/v2/net-zero/policies")
 async def get_net_zero_policies():
-    """All policies from ALL sectors for the Net Zero Plan tab."""
     all_pols = []
     for sector, policies in ALL_POLICIES.items():
         meta = SECTOR_META.get(sector, {"label": sector, "color": "#64748b"})
@@ -1446,10 +1479,9 @@ async def get_net_zero_policies():
             })
     return {"policies": all_pols, "total": len(all_pols)}
 
-
 @app.post("/v2/net-zero/run-batch")
 async def run_net_zero_batch(request: BatchRequest):
-    """Run ALL policies across ALL sectors for the Net Zero Plan tab."""
+    _log("API", f"Net-zero batch: region={request.region}, gas={request.gas}")
     all_tasks = [(s, p) for s, pols in ALL_POLICIES.items() for p in pols]
     bl_n = len(BASELINES["costa_rica"]["df"])
     years = _make_years(bl_n)
@@ -1467,6 +1499,7 @@ async def run_net_zero_batch(request: BatchRequest):
                   sector in SECTOR_BL_OUTPUTS.get(request.region, {})):
                 out = _compute_true_sector_abatement(request.region, sector, gas, cfg)
             else:
+                _log("PROXY", f"Net-zero: using proxy for {sector}")
                 out = _compute_generic_abatement(request.region, cfg)
             meta = SECTOR_META.get(sector, {})
             return pid, {
@@ -1485,6 +1518,7 @@ async def run_net_zero_batch(request: BatchRequest):
                 "opex_per_tco2":          policy.get("opex_per_tco2", 0),
             }
         except Exception as e:
+            _log("API", f"❌ Net-zero error {pid}: {e}", "ERROR")
             return pid, {"error": str(e)}
 
     results: dict = {}; errors: dict = {}
@@ -1493,7 +1527,6 @@ async def run_net_zero_batch(request: BatchRequest):
                 {pool.submit(run_one, s, p): f"{s}::{p['id']}" for s, p in all_tasks})):
             (errors if "error" in out else results)[pid] = out
 
-    # Aggregate baseline (one per sector) and total abatement across all policies
     n_ts = len(years)
     sector_bl: dict = {}
     for pid, out in results.items():
@@ -1527,6 +1560,7 @@ async def run_net_zero_batch(request: BatchRequest):
         for pid, out in results.items()
     ]
 
+    _log("API", f"✓ Net-zero batch complete: {len(results)} policies")
     return {
         "region":            request.region,
         "gas":               request.gas,
@@ -1538,7 +1572,6 @@ async def run_net_zero_batch(request: BatchRequest):
         "errors":            errors,
     }
 
-
 @app.get("/v2/transformers")
 async def list_all_transformers():
     grouped: Dict[str, List[str]] = {}
@@ -1546,14 +1579,14 @@ async def list_all_transformers():
         grouped.setdefault(sector, []).append(code)
     return {"transformers_by_sector": grouped, "total": len(ALL_TRANSFORMER_CODES)}
 
-
 @app.get("/v2/health")
 async def health():
     return {
         "status": "ok", "version": "2",
         "sectors": list(SECTOR_META.keys()),
-        "regions": list(BASELINES.keys()),
+        "regions": [k for k, v in BASELINES.items() if v is not None],
         "sector_models_active": list(SECTOR_MODELS.keys()),
         "transformer_count": len(ALL_TRANSFORMER_CODES),
         "policy_files": [f.stem for f in POLICIES_DIR.glob("*.yaml")],
+        "ethiopia_excel_available": ETHIOPIA_XLSX.exists(),
     }
