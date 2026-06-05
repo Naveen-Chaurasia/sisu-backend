@@ -1247,9 +1247,6 @@ async def get_sector_baseline(sector: str, region: str = "costa_rica", gas: str 
             _log("MODEL", f"Attempting on-demand baseline for {sector}/{region}")
             try:
                 bl_data = BASELINES.get(region, BASELINES["costa_rica"])
-                # mexico_llm CSV is transport-only; fall back to mexico for energy/agriculture/industry/waste
-                if region == "mexico_llm" and sector != "transport":
-                    bl_data = BASELINES.get("mexico", bl_data)
                 _df_out  = _model.project(bl_data["df"])
                 _pfxs    = SECTOR_EMISSION_PREFIXES.get(sector, [])
                 _em_cols = [
