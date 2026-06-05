@@ -209,8 +209,9 @@ def calculate_gas_emissions(
 # ---------------------------------------------------------------------------
 # Load SISEPUEDE baselines once at startup
 # ---------------------------------------------------------------------------
-MEXICO_CSV = os.path.join(os.path.dirname(__file__), "mexico_full_input.csv")
-UGANDA_CSV = os.path.join(os.path.dirname(__file__), "uganda_full_input.csv")
+MEXICO_CSV     = os.path.join(os.path.dirname(__file__), "mexico_full_input.csv")
+ETHIOPIA_CSV   = os.path.join(os.path.dirname(__file__), "eithopia_full_input.csv")
+MEXICO_LLM_CSV = os.path.join(os.path.dirname(__file__), "mexico_llm_full_input.csv")
 
 
 def _make_baseline(df: pd.DataFrame, transformers) -> dict:
@@ -256,19 +257,29 @@ except Exception as e:
     print(f"  Mexico: {df_mexico.shape} (transformer init skipped: {e.__class__.__name__})")
     trf_mexico = trf_costa_rica
 
-print("Loading Uganda baseline...")
-df_uganda = pd.read_csv(UGANDA_CSV)
+print("Loading Ethiopia baseline...")
+df_ethiopia = pd.read_csv(ETHIOPIA_CSV)
 try:
-    trf_uganda = trfs.Transformers({}, df_input=df_uganda)
-    print(f"  Uganda: {df_uganda.shape} (full transformers)")
+    trf_ethiopia = trfs.Transformers({}, df_input=df_ethiopia)
+    print(f"  Ethiopia: {df_ethiopia.shape} (full transformers)")
 except Exception as e:
-    print(f"  Uganda: {df_uganda.shape} (transformer init skipped: {e.__class__.__name__})")
-    trf_uganda = trf_costa_rica
+    print(f"  Ethiopia: {df_ethiopia.shape} (transformer init skipped: {e.__class__.__name__})")
+    trf_ethiopia = trf_costa_rica
+
+print("Loading Mexico LLM baseline...")
+df_mexico_llm = pd.read_csv(MEXICO_LLM_CSV)
+try:
+    trf_mexico_llm = trfs.Transformers({}, df_input=df_mexico_llm)
+    print(f"  Mexico LLM: {df_mexico_llm.shape} (full transformers)")
+except Exception as e:
+    print(f"  Mexico LLM: {df_mexico_llm.shape} (transformer init skipped: {e.__class__.__name__})")
+    trf_mexico_llm = trf_costa_rica
 
 BASELINES = {
     "costa_rica": _make_baseline(df_costa_rica, trf_costa_rica),
     "mexico":     _make_baseline(df_mexico,     trf_mexico),
-    "uganda":     _make_baseline(df_uganda,     trf_uganda),
+    "ethiopia":   _make_baseline(df_ethiopia,   trf_ethiopia),
+    "mexico_llm": _make_baseline(df_mexico_llm, trf_mexico_llm),
 }
 
 # ---------------------------------------------------------------------------
@@ -1110,7 +1121,7 @@ async def health():
 GRID_EF_KG_CO2_PER_KWH = {
     "costa_rica": 0.020,
     "mexico":     0.454,
-    "uganda":     0.091,
+    "ethiopia":   0.020,
 }
 _GRID_EF_FALLBACK = 0.400
 
