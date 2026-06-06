@@ -26,9 +26,9 @@ def _summary_iq():
     from api_emission_iq import _get_emission_summary_iq, COUNTRY_LABELS
     return _get_emission_summary_iq, COUNTRY_LABELS
 
-VALID_COUNTRIES = ["costa_rica", "mexico", "uganda"]
+VALID_COUNTRIES = ["costa_rica", "mexico", "ethiopia", "mexico_llm"]
 REAL_SECTORS    = ["transport", "waste", "industrial"]
-COUNTRY_NAMES   = {"costa_rica": "Costa Rica", "mexico": "Mexico", "uganda": "Uganda"}
+COUNTRY_NAMES   = {"costa_rica": "Costa Rica", "mexico": "Mexico", "ethiopia": "Ethiopia", "mexico_llm": "Mexico (LLM)"}
 
 mcp = FastMCP("EmissionIQ", instructions=(
     "You are EmissionIQ, a climate data analyst. "
@@ -47,7 +47,7 @@ async def get_sector_data(country: str, sector: str) -> str:
     Returns final-year value, YoY trend (%/yr), and top subsectors.
     Use sector='all' to get a ranked breakdown across transport/waste/industrial.
 
-    country: costa_rica | mexico | uganda
+    country: costa_rica | mexico | ethiopia
     sector:  transport | waste | industrial | all
     """
     if country not in VALID_COUNTRIES:
@@ -154,7 +154,7 @@ async def get_trend_analysis(country: str, sector: str) -> str:
     (2015, 2023, 2030, 2040, 2050), overall growth rate, and whether the
     sector is accelerating or decelerating toward 2050.
 
-    country: costa_rica | mexico | uganda
+    country: costa_rica | mexico | ethiopia
     sector:  transport | waste | industrial
     """
     if country not in VALID_COUNTRIES:
@@ -238,7 +238,7 @@ async def run_policy(country: str, sector: str, policy_id: str) -> str:
     Simulate a single policy and return its emission reduction % vs BAU at end of projection.
     Get policy IDs first with search_policies.
 
-    country:   costa_rica | mexico | uganda
+    country:   costa_rica | mexico | ethiopia
     sector:    transport | waste | industrial
     policy_id: policy identifier from search_policies
     """
