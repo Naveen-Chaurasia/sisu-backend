@@ -1052,6 +1052,9 @@ async def list_sector_policies(sector: str):
     def _fmt(p):
         d = {k: v for k, v in p.items() if k != "parameters"}
         d.setdefault("label", d.get("name", d.get("id", "")))
+        # Include magnitude as a proxy for reduction impact
+        params = p.get("parameters", {})
+        d["magnitude"] = params.get("magnitude", params.get("frac_switchable", 0)) or 0
         return d
 
     return {
