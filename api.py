@@ -607,14 +607,15 @@ async def run_policy(request: PolicyRequest):
     tool_result_data: dict | None = None
     policy_config_used: dict | None = None
 
-    for _ in range(3):
+    for iteration in range(6):
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
+            max_tokens=2048,
             system=SYSTEM_PROMPT,
             tools=TOOLS,
             messages=messages,
         )
+        print(f"[run-policy] iter {iteration}, stop_reason={response.stop_reason}")
 
         if response.stop_reason == "end_turn":
             summary = next(
@@ -650,6 +651,8 @@ async def run_policy(request: PolicyRequest):
         else:
             raise HTTPException(status_code=500, detail=f"Unexpected stop reason: {response.stop_reason}")
 
+    if tool_result_data:
+        return {"summary": "Policy simulation complete.", "data": tool_result_data, "policy_config": policy_config_used}
     raise HTTPException(status_code=500, detail="Agent loop exceeded max iterations")
 
 
