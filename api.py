@@ -295,7 +295,11 @@ BASELINES = {
 # ---------------------------------------------------------------------------
 # Anthropic client
 # ---------------------------------------------------------------------------
-client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+client = anthropic.Anthropic(
+    api_key=os.environ.get("ANTHROPIC_API_KEY"),
+    timeout=120.0,      # 2 min — policy simulations + LLM summary can be slow
+    max_retries=2,      # auto-retry on transient network errors / timeouts
+)
 
 # ---------------------------------------------------------------------------
 # Claude system prompt
