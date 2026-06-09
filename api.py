@@ -440,6 +440,7 @@ INSTRUCTIONS
 2. Choose the best matching transformer.
 3. Magnitude is provided explicitly in the description (e.g. "50%") — use it directly as a decimal (50% → 0.5). The system will override your value with the exact slider value anyway.
 4. Infer tp_0_ramp from target year: tp_0_ramp ≈ max(0, target_year - 2015 - 10).
+5. Always include `target_year` in your tool call — extract it from the description (e.g. "by 2035" → 2035, "by 2040" → 2040). Default to 2050 if not mentioned.
 5. Call run_sisepuede_transformation with the config.
 6. Summarize results using the sign convention below.
 
@@ -504,6 +505,10 @@ TOOLS = [
                     "required": ["identifiers", "transformer", "parameters"],
                 },
             },
+                "target_year": {
+                    "type": "integer",
+                    "description": "The target year extracted from the policy description (e.g. 'by 2035' → 2035). Defaults to 2050 if not specified.",
+                },
             "required": ["policy_name", "policy_config"],
         },
     }
@@ -668,8 +673,22 @@ async def run_policy(request: PolicyRequest):
             for block in response.content:
                 if block.type == "tool_use" and block.name == "run_sisepuede_transformation":
                     policy_config_used = block.input.get("policy_config")
+
+                    # For conversational mode (no explicit target_year/magnitude from
+                    # frontend), extract both from the LLM's tool call instead.
+                    llm_target_year = block.input.get("target_year")
+                    effective_year = request.target_year if request.target_year != 2050 or llm_target_year is None \
+                                     else llm_target_year
+
+                    # Use frontend magnitude (parametric) or LLM's policy magnitude (conversational)
+                    llm_magnitude = (policy_config_used or {}).get("parameters", {}).get("magnitude")
+                    effective_magnitude = request.magnitude if request.magnitude is not None else llm_magnitude
+
+                    # Strip target_year from block.input so it doesn't collide with kwarg
+                    tool_input = {k: v for k, v in block.input.items() if k != "target_year"}
+
                     result = run_transformation_tool(
-                        **block.input,
+                        **tool_input,
                         df_input=df_input,
                         transformers=transformers,
                         modes=modes,
@@ -678,8 +697,8 @@ async def run_policy(request: PolicyRequest):
                         eff_lookup=eff_lookup,
                         available_gases=available_gases,
                         gas_ef_lookups=gas_ef_lookups,
-                        target_year=request.target_year,
-                        requested_magnitude=request.magnitude,
+                        target_year=effective_year,
+                        requested_magnitude=effective_magnitude,
                     )
                     tool_result_data = result
                     tool_results.append({
