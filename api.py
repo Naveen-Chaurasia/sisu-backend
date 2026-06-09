@@ -254,7 +254,7 @@ try:
     trf_mexico = trfs.Transformers({}, df_input=df_mexico)
     print(f"  Mexico: {df_mexico.shape} (full transformers)")
 except Exception as e:
-    print(f"  Mexico: {df_mexico.shape} (transformer init skipped: {e.__class__.__name__})")
+    print(f"  Mexico: {df_mexico.shape} (transformer init FAILED: {e.__class__.__name__}: {e})")
     trf_mexico = trf_costa_rica
 
 print("Loading Ethiopia baseline...")
@@ -263,8 +263,18 @@ try:
     trf_ethiopia = trfs.Transformers({}, df_input=df_ethiopia)
     print(f"  Ethiopia: {df_ethiopia.shape} (full transformers)")
 except Exception as e:
-    print(f"  Ethiopia: {df_ethiopia.shape} (transformer init skipped: {e.__class__.__name__})")
+    print(f"  Ethiopia: {df_ethiopia.shape} (transformer init FAILED: {e.__class__.__name__}: {e})")
     trf_ethiopia = trf_costa_rica
+
+# Write missing columns log
+_missing_cols = sorted(set(df_costa_rica.columns) - set(df_ethiopia.columns))
+_log_path = os.path.join(os.path.dirname(__file__), "ethiopia_missing_columns.log")
+with open(_log_path, "w") as _f:
+    _f.write(f"Ethiopia vs Costa Rica — missing columns ({len(_missing_cols)} total)\n")
+    _f.write("=" * 60 + "\n\n")
+    for col in _missing_cols:
+        _f.write(col + "\n")
+print(f"  Missing columns log: {_log_path} ({len(_missing_cols)} missing)")
 
 print("Loading Mexico LLM baseline...")
 df_mexico_llm = pd.read_csv(MEXICO_LLM_CSV)
@@ -272,7 +282,7 @@ try:
     trf_mexico_llm = trfs.Transformers({}, df_input=df_mexico_llm)
     print(f"  Mexico LLM: {df_mexico_llm.shape} (full transformers)")
 except Exception as e:
-    print(f"  Mexico LLM: {df_mexico_llm.shape} (transformer init skipped: {e.__class__.__name__})")
+    print(f"  Mexico LLM: {df_mexico_llm.shape} (transformer init FAILED: {e.__class__.__name__}: {e})")
     trf_mexico_llm = trf_costa_rica
 
 BASELINES = {
@@ -424,7 +434,7 @@ INSTRUCTIONS
 ────────────
 1. Parse the user's policy: what sector? what change? how much? by when?
 2. Choose the best matching transformer.
-3. Infer magnitude from phrases like "50% electrified" → 0.5, "fully" → 0.9, "gradually" → 0.5.
+3. Magnitude is provided explicitly in the description (e.g. "50%") — use it directly as a decimal (50% → 0.5). The system will override your value with the exact slider value anyway.
 4. Infer tp_0_ramp from target year: tp_0_ramp ≈ max(0, target_year - 2015 - 10).
 5. Call run_sisepuede_transformation with the config.
 6. Summarize results using the sign convention below.
@@ -439,8 +449,8 @@ The tool returns `final_reduction_pct` and `final_reduction_tonnes` computed as:
 • NEGATIVE value → policy INCREASES emissions (bad, e.g. biofuels → diesel)
   Display as: "+X% increase", "X t added"
 
-When writing the summary table use these column headers:
-  Gas | Baseline (2050) | Policy (2050) | Change | Tonnes
+When writing the summary table, use the `target_year` value returned by the tool (NOT always 2050):
+  Gas | Baseline ({target_year}) | Policy ({target_year}) | Change | Tonnes
 And in the Change column:
   • If final_reduction_pct > 0: show "−{pct}% ↓" (emissions went down)
   • If final_reduction_pct < 0: show "+{|pct|}% ↑" (emissions went up)
@@ -510,12 +520,24 @@ def run_transformation_tool(
     eff_lookup: dict,
     available_gases: list,
     gas_ef_lookups: dict,
+    target_year: int = 2050,
+    requested_magnitude: float | None = None,
 ) -> dict:
     try:
-        transformation = trf.Transformation(policy_config, transformers)
+        import copy
+        # Always run SISEPUEDE at magnitude=1.0 for a consistent reference,
+        # then scale the abatement proportionally to the requested magnitude.
+        policy_config_full = copy.deepcopy(policy_config)
+        policy_config_full.setdefault("parameters", {})["magnitude"] = 1.0
+        transformation = trf.Transformation(policy_config_full, transformers)
         df_result = transformation()
 
         n = len(df_input)
+        years_full = [2015 + round(i * 35 / max(n - 1, 1)) for i in range(n)]
+
+        # Find cutoff index for target_year
+        cutoff = next((i for i, y in enumerate(years_full) if y >= target_year), n - 1)
+        years = years_full[:cutoff + 1]
 
         # Freeze eff and gas_ef at t=0 for the baseline only → flat reference line.
         frozen_eff = {k: np.full(n, float(v[0])) for k, v in eff_lookup.items()}
@@ -525,28 +547,39 @@ def run_transformation_tool(
             gas_ef        = gas_ef_lookups[gas]
             frozen_gas_ef = {k: np.full(n, float(v[0])) for k, v in gas_ef.items()}
 
-            baseline_em = calculate_gas_emissions(df_input,  proxies, frozen_gas_ef, frozen_eff, modes, fuels)
-            policy_em   = calculate_gas_emissions(df_result, proxies, gas_ef,        eff_lookup,  modes, fuels)
+            baseline_em  = calculate_gas_emissions(df_input,  proxies, frozen_gas_ef, frozen_eff, modes, fuels)
+            policy_full  = calculate_gas_emissions(df_result, proxies, gas_ef,        eff_lookup,  modes, fuels)
 
-            final_base = float(baseline_em[-1])
-            final_pol  = float(policy_em[-1])
+            # Scale abatement proportionally to requested magnitude.
+            # SISEPUEDE ran at magnitude=1.0; multiply the abatement by M to get
+            # the correct reduction for any slider value (0.0–1.0).
+            if requested_magnitude is not None:
+                abatement_full = baseline_em - policy_full
+                policy_em = baseline_em - (abatement_full * requested_magnitude)
+            else:
+                policy_em = policy_full
+
+            # Slice to target_year
+            baseline_slice = baseline_em[:cutoff + 1]
+            policy_slice   = policy_em[:cutoff + 1]
+
+            final_base = float(baseline_slice[-1])
+            final_pol  = float(policy_slice[-1])
             reduction  = final_base - final_pol
             pct = 100.0 * reduction / final_base if final_base > 0 else 0.0
 
             per_gas[gas] = {
-                "baseline":               [round(float(v), 4) for v in baseline_em],
-                "policy":                 [round(float(v), 4) for v in policy_em],
+                "baseline":               [round(float(v), 4) for v in baseline_slice],
+                "policy":                 [round(float(v), 4) for v in policy_slice],
                 "final_reduction_pct":    round(pct, 1),
                 "final_reduction_tonnes": round(reduction, 4),
             }
-
-        n     = len(df_input)
-        years = [2015 + round(i * 35 / max(n - 1, 1)) for i in range(n)]
 
         return {
             "success":         True,
             "policy_name":     policy_name,
             "years":           years,
+            "target_year":     target_year,
             "available_gases": available_gases,
             "per_gas":         per_gas,
         }
@@ -589,6 +622,8 @@ async def get_available_gases(region: str = "costa_rica"):
 class PolicyRequest(BaseModel):
     description: str
     region: str = "costa_rica"
+    target_year: int = 2050
+    magnitude: float | None = None
 
 
 @app.post("/api/run-policy")
@@ -639,6 +674,8 @@ async def run_policy(request: PolicyRequest):
                         eff_lookup=eff_lookup,
                         available_gases=available_gases,
                         gas_ef_lookups=gas_ef_lookups,
+                        target_year=request.target_year,
+                        requested_magnitude=request.magnitude,
                     )
                     tool_result_data = result
                     tool_results.append({
